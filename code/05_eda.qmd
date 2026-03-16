@@ -1,0 +1,531 @@
+---
+title: "Exploratory Data Analysis — HRI AGRRA Belize"
+subtitle: "Coral reef response variables and oceanographic predictors"
+author: "HRI Fish Predictor Model"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Show code"
+    fig-width: 8
+    fig-height: 6
+    embed-resources: true
+    theme: cosmo
+  pdf:
+    toc: true
+    fig-width: 7
+    fig-height: 5
+    geometry: margin=1in
+execute:
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(tidyverse)
+library(here)
+library(readxl)
+library(corrplot)
+
+# Output paths
+fig_dir   <- here("results", "figures")
+table_dir <- here("results", "tables")
+dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Standardized theme
+theme_hri <- function() {
+  theme_minimal(base_size = 14) +
+    theme(
+      plot.title    = element_text(face = "bold", hjust = 0.5, size = 16),
+      plot.subtitle = element_text(hjust = 0.5, size = 12, color = "gray50"),
+      axis.title.y  = element_text(face = "bold"),
+      axis.text.x   = element_text(angle = 45, vjust = 0.5),
+      panel.grid.major = element_line(color = "gray85", linetype = "dashed"),
+      panel.grid.minor = element_blank(),
+      legend.position  = "top"
+    )
+}
+```
+
+# Data Overview
+
+```{r load-data}
+full  <- read.csv(here("results", "tables", "ResponseVariables_full.csv"))
+input <- read.csv(here("results", "tables", "ResponseVariables_input.csv"))
+
+full$YEAR <- factor(full$YEAR)
+```
+
+The pipeline produces two datasets from AGRRA survey data across three survey
+years (2018, 2021, 2023) at reef sites along the Belize Barrier Reef:
+
+- **Full dataset**: `r nrow(full)` observations (site x year) with
+  `r ncol(full)` variables covering benthic cover and fish biomass at the
+  family level.
+- **Site-averaged dataset**: `r nrow(input)` unique sites with mean response
+  values across years.
+
+## Sample sizes by year
+
+```{r sample-sizes}
+#| label: tbl-sample-sizes
+#| tbl-cap: "Number of survey records per year"
+full %>%
+  group_by(YEAR) %>%
+  summarise(
+    n_total    = n(),
+    n_benthic  = sum(!is.na(tCORALavg)),
+    n_fish     = sum(!is.na(tCommBiomass)),
+    .groups = "drop"
+  ) %>%
+  knitr::kable(
+    col.names = c("Year", "Total records", "Benthic records", "Fish records")
+  )
+```
+
+## Missingness
+
+Benthic and fish surveys don't always overlap at the same sites, producing NAs
+when the datasets are merged.
+
+```{r missingness}
+#| fig-cap: "Proportion of missing values per variable"
+na_pct <- colMeans(is.na(full)) * 100
+na_df  <- tibble(variable = names(na_pct), pct_missing = na_pct) %>%
+  filter(pct_missing > 0) %>%
+  arrange(desc(pct_missing))
+
+ggplot(na_df, aes(x = reorder(variable, pct_missing), y = pct_missing)) +
+  geom_col(fill = "#2C3E50") +
+  coord_flip() +
+  labs(x = NULL, y = "% Missing", title = "Missing Data by Variable") +
+  theme_hri()
+```
+
+---
+
+# Benthic Cover
+
+## Distributions by year
+
+```{r benthic-distributions}
+#| fig-cap: "Distribution of coral and macroalgae cover across survey years"
+benthic_long <- full %>%
+  filter(!is.na(tCORALavg)) %>%
+  pivot_longer(
+    cols = c(tCORALavg, tFMAavg),
+    names_to  = "variable",
+    values_to = "value"
+  ) %>%
+  mutate(variable = recode(variable,
+    tCORALavg = "Coral cover (%)",
+    tFMAavg   = "Fleshy macroalgae cover (%)"
+  ))
+
+ggplot(benthic_long, aes(x = YEAR, y = value, fill = variable)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = 21,
+               outlier.fill = "white", outlier.color = "black") +
+  scale_fill_manual(values = c("#1b9e77", "#d95f02")) +
+  labs(x = NULL, y = "Cover (%)", fill = NULL,
+       title = "Benthic Cover by Year") +
+  theme_hri()
+```
+
+## Temporal trends
+
+```{r benthic-trends}
+#| fig-cap: "Mean coral and macroalgae cover across survey years"
+avg_benthic <- full %>%
+  filter(!is.na(tCORALavg)) %>%
+  group_by(YEAR) %>%
+  summarise(
+    coral = mean(tCORALavg),
+    algae = mean(tFMAavg),
+    n = n(),
+    .groups = "drop"
+  )
+
+ggplot(avg_benthic, aes(x = YEAR, group = 1)) +
+  geom_line(aes(y = coral, color = "Coral"), linewidth = 1) +
+  geom_line(aes(y = algae, color = "Macroalgae"), linewidth = 1) +
+  geom_point(aes(y = coral, color = "Coral"), size = 3) +
+  geom_point(aes(y = algae, color = "Macroalgae"), size = 3) +
+  scale_color_manual(values = c("Coral" = "#1b9e77", "Macroalgae" = "#d95f02")) +
+  scale_y_continuous(limits = c(0, 50)) +
+  labs(x = "Year", y = "Mean cover (%)", color = NULL,
+       title = "Benthic Cover Trends") +
+  theme_hri()
+```
+
+## Coral vs. macroalgae
+
+```{r coral-vs-algae}
+#| fig-cap: "Coral cover vs. macroalgae cover at the site level, colored by year"
+full %>%
+  filter(!is.na(tCORALavg)) %>%
+  ggplot(aes(x = tFMAavg, y = tCORALavg, color = YEAR)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed", linewidth = 0.5) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Fleshy macroalgae cover (%)", y = "Coral cover (%)",
+       color = "Year",
+       title = "Coral vs. Macroalgae Cover") +
+  theme_hri()
+```
+
+---
+
+# Fish Biomass
+
+## Commercial fish biomass
+
+Commercial species include snappers (LUTJ), groupers (SERR), jacks (CARA),
+barracuda (SPHY), and grunts (HAEM). Biomass is in g/100m^2^.
+
+```{r commercial-distributions}
+#| fig-cap: "Commercial fish family biomass distributions by year"
+comm_long <- full %>%
+  filter(!is.na(tCommBiomass)) %>%
+  select(YEAR, tLUTJavg, tSERRavg, tCARAavg, tSPHYavg, tHAEMavg) %>%
+  pivot_longer(-YEAR, names_to = "family", values_to = "biomass") %>%
+  mutate(family = recode(family,
+    tLUTJavg = "Snappers",
+    tSERRavg = "Groupers",
+    tCARAavg = "Jacks",
+    tSPHYavg = "Barracuda",
+    tHAEMavg = "Grunts"
+  ))
+
+ggplot(comm_long, aes(x = family, y = biomass, fill = YEAR)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 1) +
+  scale_y_log10(labels = scales::comma) +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(x = NULL, y = "Biomass (g/100m², log scale)", fill = "Year",
+       title = "Commercial Fish Biomass by Family") +
+  theme_hri()
+```
+
+```{r commercial-trend}
+#| fig-cap: "Total commercial fish biomass trend"
+avg_comm <- full %>%
+  filter(!is.na(tCommBiomass)) %>%
+  group_by(YEAR) %>%
+  summarise(avg = mean(tCommBiomass), n = n(), .groups = "drop")
+
+ggplot(avg_comm, aes(x = YEAR, y = avg, group = 1)) +
+  geom_line(color = "#2C3E50", linewidth = 1.2) +
+  geom_point(color = "#2C3E50", size = 3, shape = 21,
+             fill = "white", stroke = 1.2) +
+  labs(x = "Year", y = "Mean biomass (g/100m²)",
+       title = "Commercial Fish Biomass Trend") +
+  theme_hri()
+```
+
+## Herbivorous fish biomass
+
+Herbivorous species include surgeonfish (ACAN/Acanthuridae) and parrotfish
+(SCAR/Scaridae).
+
+```{r herbivore-distributions}
+#| fig-cap: "Herbivorous fish family biomass by year"
+herb_long <- full %>%
+  filter(!is.na(tHerbiBiomass)) %>%
+  select(YEAR, tACANavg, tSCARavg) %>%
+  pivot_longer(-YEAR, names_to = "family", values_to = "biomass") %>%
+  mutate(family = recode(family,
+    tACANavg = "Surgeonfish",
+    tSCARavg = "Parrotfish"
+  ))
+
+ggplot(herb_long, aes(x = family, y = biomass, fill = YEAR)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 1) +
+  scale_y_log10(labels = scales::comma) +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(x = NULL, y = "Biomass (g/100m², log scale)", fill = "Year",
+       title = "Herbivorous Fish Biomass by Family") +
+  theme_hri()
+```
+
+```{r herbivore-trend}
+#| fig-cap: "Total herbivorous fish biomass trend"
+avg_herb <- full %>%
+  filter(!is.na(tHerbiBiomass)) %>%
+  group_by(YEAR) %>%
+  summarise(avg = mean(tHerbiBiomass), n = n(), .groups = "drop")
+
+ggplot(avg_herb, aes(x = YEAR, y = avg, group = 1)) +
+  geom_line(color = "#E74C3C", linewidth = 1.2) +
+  geom_point(color = "#E74C3C", size = 3, shape = 21,
+             fill = "white", stroke = 1.2) +
+  labs(x = "Year", y = "Mean biomass (g/100m²)",
+       title = "Herbivorous Fish Biomass Trend") +
+  theme_hri()
+```
+
+## Combined biomass trends
+
+```{r combined-trend}
+#| fig-cap: "Commercial vs. herbivorous fish biomass trends"
+combined <- bind_rows(
+  avg_comm %>% mutate(group = "Commercial"),
+  avg_herb %>% mutate(group = "Herbivorous")
+)
+
+ggplot(combined, aes(x = YEAR, y = avg, group = group, color = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3, shape = 21, fill = "white", stroke = 1.2) +
+  scale_color_manual(values = c("Commercial" = "#2C3E50",
+                                "Herbivorous" = "#E74C3C")) +
+  labs(x = "Year", y = "Mean biomass (g/100m²)", color = NULL,
+       title = "Fish Biomass Trends") +
+  theme_hri()
+```
+
+---
+
+# Response Variable Relationships
+
+```{r response-scatter-matrix}
+#| fig-cap: "Pairwise relationships among site-averaged response variables"
+#| fig-height: 8
+resp_vars <- input %>%
+  select(tCommBiomass_avg, tHerbiBiomass_avg, tCORALavg_avg, tFMAavg_avg) %>%
+  rename(
+    `Commercial fish` = tCommBiomass_avg,
+    `Herbivorous fish` = tHerbiBiomass_avg,
+    `Coral cover`  = tCORALavg_avg,
+    `Macroalgae`   = tFMAavg_avg
+  )
+
+pairs(resp_vars, pch = 16, col = adjustcolor("#2C3E50", alpha.f = 0.5),
+      main = "Response Variable Pairs (Site Averages)")
+```
+
+```{r response-correlations}
+#| fig-cap: "Correlation matrix of response variables"
+resp_complete <- na.omit(resp_vars)
+cor_resp <- cor(resp_complete, method = "pearson")
+
+corrplot(cor_resp, method = "number", type = "upper", diag = FALSE,
+         number.cex = 1.0, tl.cex = 0.9, tl.col = "black",
+         col = colorRampPalette(c("#E74C3C", "white", "#2C3E50"))(200),
+         title = "Response Variable Correlations",
+         mar = c(0, 0, 2, 0))
+```
+
+```{r fish-vs-benthic}
+#| fig-cap: "Key ecological relationships"
+#| layout-ncol: 2
+p1 <- ggplot(input, aes(x = tCommBiomass_avg, y = tCORALavg_avg)) +
+  geom_point(alpha = 0.5, color = "#2C3E50") +
+  geom_smooth(method = "lm", color = "#E74C3C", se = TRUE, alpha = 0.2) +
+  labs(x = "Commercial fish biomass (g/100m²)",
+       y = "Coral cover (%)") +
+  theme_hri()
+
+p2 <- ggplot(input, aes(x = tHerbiBiomass_avg, y = tFMAavg_avg)) +
+  geom_point(alpha = 0.5, color = "#2C3E50") +
+  geom_smooth(method = "lm", color = "#E74C3C", se = TRUE, alpha = 0.2) +
+  labs(x = "Herbivorous fish biomass (g/100m²)",
+       y = "Fleshy macroalgae cover (%)") +
+  theme_hri()
+
+p1
+p2
+```
+
+---
+
+# Spatial Distribution
+
+```{r site-map}
+#| fig-cap: "Survey site locations along the Belize Barrier Reef, colored by mean coral cover"
+input_map <- input %>% filter(!is.na(tCORALavg_avg))
+
+ggplot(input_map, aes(x = Longitude, y = Latitude, color = tCORALavg_avg)) +
+  geom_point(size = 2, alpha = 0.8) +
+  scale_color_viridis_c(option = "C", name = "Coral\ncover (%)") +
+  labs(title = "Survey Sites — Coral Cover",
+       x = "Longitude", y = "Latitude") +
+  coord_quickmap() +
+  theme_hri()
+```
+
+```{r site-map-fish}
+#| fig-cap: "Survey sites colored by mean herbivorous fish biomass"
+input_fish <- input %>% filter(!is.na(tHerbiBiomass_avg))
+
+ggplot(input_fish, aes(x = Longitude, y = Latitude, color = tHerbiBiomass_avg)) +
+  geom_point(size = 2, alpha = 0.8) +
+  scale_color_viridis_c(option = "D", name = "Herb. fish\n(g/100m²)") +
+  labs(title = "Survey Sites — Herbivorous Fish Biomass",
+       x = "Longitude", y = "Latitude") +
+  coord_quickmap() +
+  theme_hri()
+```
+
+---
+
+# Predictor Variable Correlation
+
+The oceanographic/bathymetric predictor variables were extracted from ArcGIS
+rasters at 10m resolution (TNC Bathymetry) and joined to survey sites.
+
+```{r load-predictors}
+ext_path <- here("data", "external", "HRI_all_variables.csv")
+stopifnot(
+  "External data file missing — see data/external/README.md" =
+    file.exists(ext_path)
+)
+
+hri <- read.csv(ext_path)
+
+# Rename to descriptive labels
+hri <- hri %>%
+  rename(
+    lon           = Longitude_,
+    lat           = Latitude_y,
+    coral         = Coral_cove,
+    algae         = Algae_cove,
+    fish_comm     = Commercial,
+    fish_herb     = Herbivorou,
+    aspect        = aspect_10m,
+    aspect_1      = aspect_1_1,
+    aspect_2      = aspect_1_2,
+    aspect_s_curv = aspect_s_1,
+    bathy         = depth
+  )
+```
+
+```{r predictor-selection}
+# Keep only oceanographic/terrain predictors (drop response + coordinate cols)
+response_cols <- c("FID", "lon", "lat", "coral", "algae", "fish_comm", "fish_herb")
+
+predictors <- hri %>%
+  select(-all_of(response_cols)) %>%
+  mutate(across(where(is.numeric), ~ifelse(. == -9999, NA, .)))
+
+pred_complete <- na.omit(predictors)
+cat("Predictor variables:", ncol(pred_complete), "\n")
+cat("Complete cases:", nrow(pred_complete), "of", nrow(predictors), "\n")
+```
+
+## Full correlation matrix
+
+```{r cor-all-pred}
+#| fig-cap: "Pearson correlation among all predictor variables"
+#| fig-height: 8
+cor_all <- cor(pred_complete, use = "complete.obs", method = "pearson")
+
+corrplot(cor_all, method = "number", type = "upper", diag = FALSE,
+         number.cex = 0.6, tl.cex = 0.7, tl.col = "black",
+         title = "All Predictor Correlations",
+         mar = c(0, 0, 2, 0))
+
+# Save to file
+png(file.path(fig_dir, "correlation_all_vbles.png"),
+    width = 8, height = 8, units = "in", res = 300)
+corrplot(cor_all, method = "number", type = "upper", diag = FALSE,
+         number.cex = 0.6, tl.cex = 0.7, tl.col = "black")
+dev.off()
+```
+
+## Identify collinear variables
+
+Variables with |r| > 0.7 should be removed before modeling to reduce
+multicollinearity.
+
+```{r collinearity}
+#| tbl-cap: "Variable pairs with |r| > 0.7"
+high_cor <- which(abs(cor_all) > 0.7 & upper.tri(cor_all), arr.ind = TRUE)
+
+if (nrow(high_cor) > 0) {
+  cor_pairs <- tibble(
+    var1 = rownames(cor_all)[high_cor[, 1]],
+    var2 = colnames(cor_all)[high_cor[, 2]],
+    r    = cor_all[high_cor]
+  ) %>%
+    arrange(desc(abs(r)))
+
+  knitr::kable(cor_pairs, digits = 3)
+} else {
+  cat("No variable pairs exceed |r| > 0.7\n")
+}
+```
+
+```{r remove-collinear}
+# Remove variables identified as redundant
+exclude_vars <- c("curv_plan", "slopeslo_1", "slope_240")
+pred_reduced <- pred_complete %>%
+  select(-any_of(exclude_vars))
+
+cat("Retained predictors:", ncol(pred_reduced), "\n")
+cat("Removed:", paste(intersect(exclude_vars, names(pred_complete)), collapse = ", "), "\n")
+```
+
+## Reduced correlation matrix
+
+```{r cor-reduced}
+#| fig-cap: "Correlation matrix after removing collinear variables"
+cor_reduced <- cor(pred_reduced, use = "complete.obs", method = "pearson")
+
+corrplot(cor_reduced, method = "number", type = "upper", diag = FALSE,
+         number.cex = 0.7, tl.cex = 0.8, tl.col = "black",
+         title = "Retained Predictor Correlations",
+         mar = c(0, 0, 2, 0))
+
+png(file.path(fig_dir, "correlation_final.png"),
+    width = 7, height = 7, units = "in", res = 300)
+corrplot(cor_reduced, method = "number", type = "upper", diag = FALSE,
+         number.cex = 0.7, tl.cex = 0.8, tl.col = "black")
+dev.off()
+```
+
+## Predictor distributions
+
+```{r predictor-histograms}
+#| fig-cap: "Distributions of retained predictor variables"
+#| fig-height: 10
+pred_long <- pred_reduced %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "value")
+
+ggplot(pred_long, aes(x = value)) +
+  geom_histogram(bins = 30, fill = "#2C3E50", alpha = 0.7, color = "white") +
+  facet_wrap(~variable, scales = "free", ncol = 3) +
+  labs(x = NULL, y = "Count",
+       title = "Predictor Variable Distributions") +
+  theme_hri() +
+  theme(axis.text.x = element_text(angle = 0, size = 8))
+```
+
+---
+
+# Export model-ready data
+
+```{r export}
+data_model <- hri %>%
+  select(-any_of(exclude_vars))
+
+write.csv(data_model,
+          file = file.path(table_dir, "bz_data_model.csv"),
+          row.names = FALSE)
+cat("Exported:", nrow(data_model), "rows x", ncol(data_model), "cols\n")
+```
+
+---
+
+# Summary
+
+| Metric | Value |
+|--------|-------|
+| Survey years | 2018, 2021, 2023 |
+| Total observations | `r nrow(full)` |
+| Unique sites | `r nrow(input)` |
+| Mean coral cover | `r round(mean(full$tCORALavg, na.rm=TRUE), 1)`% |
+| Mean macroalgae cover | `r round(mean(full$tFMAavg, na.rm=TRUE), 1)`% |
+| Mean commercial fish biomass | `r round(mean(full$tCommBiomass, na.rm=TRUE), 0)` g/100m² |
+| Mean herbivorous fish biomass | `r round(mean(full$tHerbiBiomass, na.rm=TRUE), 0)` g/100m² |
+| Predictor variables (retained) | `r ncol(pred_reduced)` |
