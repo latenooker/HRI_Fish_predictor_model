@@ -25,7 +25,7 @@
 vignettes/*.html
 vignettes/*.pdf
 
-# OAuth2 token, see https://github.com/hadley/httr/releases/tag/v0.3
+# OAuth2 token
 .httr-oauth
 
 # knitr and R markdown default cache directories
@@ -39,11 +39,23 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
-# pkgdown site
-docs/
+# pkgdown site (commented out — docs/ is used for project documentation)
+# docs/
+
+# RStudio Connect folder
+rsconnect/
 
 # translation temp files
 po/*~
 
-# RStudio Connect folder
-rsconnect/
+# Excel temp/lock files
+data/raw/~$*
+
+# External data (not tracked — see data/external/README.md)
+data/external/*.csv
+
+# R workspaces
+R_workspaces/
+
+# R Notebook HTML output (regenerated from source)
+*.nb.html

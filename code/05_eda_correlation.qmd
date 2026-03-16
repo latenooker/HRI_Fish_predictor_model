@@ -1,0 +1,123 @@
+---
+title: "Correlation Matrix — Oceanographic Variables"
+format:
+  html:
+    toc: true
+  pdf:
+    toc: true
+---
+
+```{r setup, message=FALSE}
+library(dplyr)
+library(corrplot)
+library(ggplot2)
+library(tidyverse)
+library(MASS)
+library(car)
+library(here)
+```
+
+```{r paths}
+Fig_output_folder   <- here("results", "figures")
+Table_output_folder <- here("results", "tables")
+```
+
+## Load data
+
+Input data with response and predictor variables. The marine predictors were
+created in ArcGIS using bathymetry at 10m resolution from TNC.
+
+The external data file `HRI_all_variables.csv` must be placed in `data/external/`.
+See `data/external/README.md` for details on how to obtain it.
+
+```{r load-data}
+ext_path <- here("data", "external", "HRI_all_variables.csv")
+stopifnot(
+ "External data file missing: data/external/HRI_all_variables.csv\nSee data/external/README.md for instructions." =
+   file.exists(ext_path)
+)
+
+HRI_variables <- read.csv(ext_path)
+
+# Standardize column names to shorter descriptive labels
+HRI_variables <- HRI_variables %>%
+  rename(
+    x              = Latitude,
+    y              = Longitude,
+    cor            = Coral_cove,
+    algae          = Algae_cove,
+    fish_com       = Commercial,
+    fish_her       = Herbivorou,
+    aspect_std_curv = aspect_s_c,
+    slopeslope_240 = sloslo_240,
+    slopeslope     = slopeslop,
+    bathy          = bz_bathy
+  )
+```
+
+## Filter to oceanographic predictors only
+
+Some raster extraction artifacts produce -9999 for NA; replace those.
+
+```{r filter-predictors}
+colum_excluir <- c("x", "y", "cor", "algae", "fish_com", "fish_her")
+
+data <- HRI_variables[, !names(HRI_variables) %in% colum_excluir] %>%
+  mutate(across(where(is.numeric), ~ifelse(. == -9999.000, NA, .)))
+
+print(data)
+```
+
+```{r complete-cases}
+data_complete <- na.omit(data)
+```
+
+## Correlation matrix (all predictors)
+
+```{r cor-all, fig.width=6, fig.height=6}
+cor_matrix <- cor(data_complete, use = "complete.obs", method = "pearson")
+
+png(filename = file.path(Fig_output_folder, "correlation_all_vbles.png"),
+    width = 6, height = 6, units = "in", res = 300)
+corrplot(cor_matrix, method = "number", type = "upper",
+         diag = FALSE, number.cex = 0.7)
+dev.off()
+
+# Also display inline
+corrplot(cor_matrix, method = "number", type = "upper",
+         diag = FALSE, number.cex = 0.7)
+```
+
+## Remove highly correlated variables (|r| > 0.7)
+
+Removed: `curv_pro`, `curv_plan`, `slopeslope_240`
+
+```{r remove-correlated}
+exclude_vbles <- c("curv_pro", "curv_plan", "slopeslope_240")
+data.cor <- data_complete[, !names(data_complete) %in% exclude_vbles]
+```
+
+## Final correlation matrix
+
+```{r cor-final, fig.width=6, fig.height=6}
+cor_matrix.2 <- cor(data.cor, use = "complete.obs", method = "pearson")
+
+png(filename = file.path(Fig_output_folder, "correlation_final.png"),
+    width = 6, height = 6, units = "in", res = 300)
+corrplot(cor_matrix.2, method = "number", type = "upper",
+         diag = FALSE, number.cex = 0.7)
+dev.off()
+
+corrplot(cor_matrix.2, method = "number", type = "upper",
+         diag = FALSE, number.cex = 0.7)
+```
+
+## Export model-ready data
+
+```{r export}
+data_model <- HRI_variables[, !names(HRI_variables) %in% exclude_vbles]
+
+write.csv(data_model,
+          file = file.path(Table_output_folder, "bz_data_model.csv"),
+          row.names = FALSE)
+```
