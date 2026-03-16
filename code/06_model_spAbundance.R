@@ -489,7 +489,15 @@ lambda_mean <- matrix(colMeans(lambda_combined),
 
 # Correlation from loadings
 cov_from_lambda <- lambda_mean %*% t(lambda_mean)
-diag_sigma <- colMeans(as_matrix(best_model$sigma.sq.samples))
+# Gaussian models use tau.sq for residual variance (not sigma.sq)
+tau_sq_mat <- if (!is.null(best_model$sigma.sq.samples)) {
+  as_matrix(best_model$sigma.sq.samples)
+} else if (!is.null(best_model$tau.sq.samples)) {
+  as_matrix(best_model$tau.sq.samples)
+} else {
+  matrix(1, nrow = 1, ncol = n_species)
+}
+diag_sigma <- colMeans(tau_sq_mat)
 cov_total  <- cov_from_lambda + diag(diag_sigma)
 cor_species <- cov2cor(cov_total)
 rownames(cor_species) <- species_names
@@ -535,13 +543,12 @@ pred_coords <- cbind(
   y = (dat_pred$lat - lat_center) * 110.57
 )
 
-pred_data <- list(
-  covs   = pred_covs,
-  coords = pred_coords
-)
+# predict.sfMsAbund expects X.0 (design matrix) and coords.0
+# Build the design matrix from the formula + new data
+X.0 <- model.matrix(ms_formula, data = pred_covs)
 
 pred_df <- tryCatch({
-  preds_out <- predict(best_model, pred_data)
+  preds_out <- predict(best_model, X.0 = X.0, coords.0 = pred_coords)
 
   # Extract posterior mean predictions for each species at each site
   pred_means <- apply(preds_out$y.0.samples, c(2, 3), mean)

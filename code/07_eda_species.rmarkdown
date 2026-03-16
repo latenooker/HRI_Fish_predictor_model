@@ -1,0 +1,441 @@
+---
+title: "HRI AGRRA Belize — Species-Level EDA"
+subtitle: "Individual fish family biomass distributions, trends, and spatial patterns"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    code-summary: "Code"
+    embed-resources: true
+    fig-width: 10
+    fig-height: 7
+  pdf:
+    documentclass: article
+    papersize: letter
+    margin-left: 1in
+    margin-right: 1in
+    fig-width: 9
+    fig-height: 6
+execute:
+  warning: false
+  message: false
+  echo: true
+editor: visual
+---
+
+```{r setup}
+#| echo: false
+library(tidyverse)
+library(here)
+library(corrplot)
+
+fig_dir <- here("results", "figures")
+dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+
+theme_hri <- function() {
+  theme_minimal(base_size = 14) +
+    theme(
+      plot.title    = element_text(face = "bold", hjust = 0.5, size = 16),
+      plot.subtitle = element_text(hjust = 0.5, size = 12, color = "gray50"),
+      axis.title    = element_text(face = "bold"),
+      axis.text.x   = element_text(angle = 45, hjust = 1),
+      panel.grid.major = element_line(color = "gray85", linetype = "dashed"),
+      panel.grid.minor = element_blank(),
+      legend.position  = "top",
+      legend.text      = element_text(size = 11)
+    )
+}
+
+# --- Load data ----------------------------------------------------------------
+full  <- read.csv(here("results", "tables", "ResponseVariables_full.csv"))
+input <- read.csv(here("results", "tables", "ResponseVariables_input.csv"))
+full$YEAR <- factor(full$YEAR)
+
+# Species lookup table
+species_info <- tribble(
+  ~code,       ~family,          ~common,        ~group,
+  "tLUTJavg",  "Lutjanidae",     "Snappers",     "Commercial",
+
+  "tSERRavg",  "Serranidae",     "Groupers",     "Commercial",
+  "tCARAavg",  "Carangidae",     "Jacks",        "Commercial",
+  "tSPHYavg",  "Sphyraenidae",   "Barracuda",    "Commercial",
+  "tHAEMavg",  "Haemulidae",     "Grunts",       "Commercial",
+  "tACANavg",  "Acanthuridae",   "Surgeonfish",  "Herbivorous",
+  "tSCARavg",  "Scaridae",       "Parrotfish",   "Herbivorous"
+)
+
+species_cols <- species_info$code
+species_labels <- setNames(species_info$common, species_info$code)
+group_colors <- c("Commercial" = "#2C3E50", "Herbivorous" = "#E74C3C")
+```
+
+## Overview
+
+This document examines individual fish family biomass patterns across the Belize Barrier Reef, moving beyond the grouped commercial/herbivorous totals used in the initial analysis. Seven fish families are examined: 5 commercial (Snappers, Groupers, Jacks, Barracuda, Grunts) and 2 herbivorous (Surgeonfish, Parrotfish).
+
+```{r data-summary}
+# Observations with fish data
+fish_data <- full %>% filter(!is.na(tCommBiomass) | !is.na(tHerbiBiomass))
+
+fish_data %>%
+  summarise(
+    `Total obs` = n(),
+    `With commercial` = sum(!is.na(tCommBiomass)),
+    `With herbivorous` = sum(!is.na(tHerbiBiomass)),
+    `Years` = paste(unique(YEAR), collapse = ", ")
+  ) %>%
+  knitr::kable()
+```
+
+## Species Distributions
+
+### Biomass distributions by family
+
+```{r species-distributions}
+#| fig-height: 8
+fish_long <- full %>%
+  select(YEAR, all_of(species_cols)) %>%
+  pivot_longer(-YEAR, names_to = "species", values_to = "biomass") %>%
+  filter(!is.na(biomass)) %>%
+  mutate(
+    common = species_labels[species],
+    group  = species_info$group[match(species, species_info$code)]
+  )
+
+ggplot(fish_long, aes(x = biomass + 1, fill = group)) +
+  geom_histogram(bins = 40, alpha = 0.7, color = "white") +
+  scale_x_log10(labels = scales::comma) +
+  scale_fill_manual(values = group_colors) +
+  facet_wrap(~common, scales = "free", ncol = 2) +
+  labs(x = "Biomass (g/100m², log scale)", y = "Count", fill = "Group",
+       title = "Biomass Distributions by Fish Family") +
+  theme_hri()
+```
+
+### Summary statistics
+
+```{r species-summary-table}
+fish_long %>%
+  group_by(common, group) %>%
+  summarise(
+    n       = n(),
+    mean    = round(mean(biomass, na.rm = TRUE), 1),
+    median  = round(median(biomass, na.rm = TRUE), 1),
+    sd      = round(sd(biomass, na.rm = TRUE), 1),
+    min     = round(min(biomass, na.rm = TRUE), 1),
+    max     = round(max(biomass, na.rm = TRUE), 1),
+    pct_zero = round(100 * mean(biomass == 0, na.rm = TRUE), 1),
+    .groups = "drop"
+  ) %>%
+  arrange(group, desc(mean)) %>%
+  knitr::kable(col.names = c("Family", "Group", "n", "Mean", "Median", "SD",
+                              "Min", "Max", "% Zero"))
+```
+
+### Boxplots by family and year
+
+```{r species-boxplots-year}
+#| fig-height: 8
+ggplot(fish_long, aes(x = common, y = biomass + 1, fill = YEAR)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 0.8) +
+  scale_y_log10(labels = scales::comma) +
+  scale_fill_brewer(palette = "Dark2") +
+  facet_wrap(~group, scales = "free_x") +
+  labs(x = NULL, y = "Biomass (g/100m², log scale)", fill = "Year",
+       title = "Fish Biomass by Family and Year") +
+  theme_hri()
+```
+
+## Temporal Trends
+
+### Mean biomass by family over time
+
+```{r species-trends}
+#| fig-height: 6
+trends <- fish_long %>%
+  group_by(YEAR, common, group) %>%
+  summarise(mean_bio = mean(biomass, na.rm = TRUE), .groups = "drop")
+
+ggplot(trends, aes(x = YEAR, y = mean_bio, group = common, color = common)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3, shape = 21, fill = "white", stroke = 1.2) +
+  facet_wrap(~group, scales = "free_y") +
+  scale_color_brewer(palette = "Set2") +
+  labs(x = "Year", y = "Mean biomass (g/100m²)", color = "Family",
+       title = "Biomass Trends by Fish Family") +
+  theme_hri()
+```
+
+### Relative composition over time
+
+```{r species-composition}
+comp <- fish_long %>%
+  group_by(YEAR, group, common) %>%
+  summarise(total = sum(biomass, na.rm = TRUE), .groups = "drop") %>%
+  group_by(YEAR, group) %>%
+  mutate(pct = 100 * total / sum(total))
+
+ggplot(comp, aes(x = YEAR, y = pct, fill = common)) +
+  geom_col(alpha = 0.85, color = "white", linewidth = 0.3) +
+  facet_wrap(~group) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(x = "Year", y = "% of Group Biomass", fill = "Family",
+       title = "Relative Composition within Groups") +
+  theme_hri()
+```
+
+## Species Correlations
+
+### Pairwise correlations among all 7 families
+
+```{r species-correlation-matrix}
+#| fig-height: 7
+fish_wide <- full %>%
+  select(all_of(species_cols)) %>%
+  rename_with(~species_labels[.x]) %>%
+  na.omit()
+
+cor_mat <- cor(fish_wide, use = "pairwise.complete.obs")
+
+corrplot(cor_mat, method = "number", type = "upper", diag = FALSE,
+         number.cex = 0.85, tl.cex = 0.9, tl.col = "black",
+         col = colorRampPalette(c("#E74C3C", "white", "#2C3E50"))(200),
+         title = "Pairwise Correlations — Fish Family Biomass",
+         mar = c(0, 0, 2, 0))
+```
+
+### Correlations with benthic cover
+
+```{r species-benthic-correlations}
+#| fig-height: 6
+benthic_fish <- full %>%
+  select(tCORALavg, tFMAavg, all_of(species_cols)) %>%
+  rename(Coral = tCORALavg, Macroalgae = tFMAavg) %>%
+  rename_with(~ifelse(.x %in% names(species_labels), species_labels[.x], .x)) %>%
+  na.omit()
+
+cor_bf <- cor(benthic_fish)
+
+corrplot(cor_bf, method = "number", type = "upper", diag = FALSE,
+         number.cex = 0.7, tl.cex = 0.85, tl.col = "black",
+         col = colorRampPalette(c("#E74C3C", "white", "#2C3E50"))(200),
+         title = "Correlations: Fish Families × Benthic Cover",
+         mar = c(0, 0, 2, 0))
+```
+
+### Key scatterplots
+
+```{r species-scatter-key}
+#| fig-height: 8
+p_pairs <- list()
+
+# Parrotfish vs macroalgae (herbivory hypothesis)
+p_pairs[[1]] <- ggplot(full, aes(x = tSCARavg, y = tFMAavg, color = YEAR)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.7) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Parrotfish biomass", y = "Macroalgae cover (%)",
+       title = "Parrotfish vs Macroalgae") +
+  theme_hri()
+
+# Groupers vs snappers (competition/predation)
+p_pairs[[2]] <- ggplot(full, aes(x = tSERRavg, y = tLUTJavg, color = YEAR)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.7) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Grouper biomass", y = "Snapper biomass",
+       title = "Groupers vs Snappers") +
+  theme_hri()
+
+# Parrotfish vs coral (bioerosion/facilitation)
+p_pairs[[3]] <- ggplot(full, aes(x = tSCARavg, y = tCORALavg, color = YEAR)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.7) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Parrotfish biomass", y = "Coral cover (%)",
+       title = "Parrotfish vs Coral") +
+  theme_hri()
+
+# Surgeonfish vs parrotfish (herbivore competition)
+p_pairs[[4]] <- ggplot(full, aes(x = tACANavg, y = tSCARavg, color = YEAR)) +
+  geom_point(alpha = 0.5, size = 1.5) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.7) +
+  scale_color_brewer(palette = "Dark2") +
+  labs(x = "Surgeonfish biomass", y = "Parrotfish biomass",
+       title = "Surgeonfish vs Parrotfish") +
+  theme_hri()
+
+gridExtra::grid.arrange(grobs = p_pairs, ncol = 2)
+```
+
+## Spatial Patterns
+
+### Individual species spatial distributions
+
+```{r species-spatial-maps}
+#| fig-height: 10
+# Site-level averages for mapping
+site_avg <- full %>%
+  group_by(Name, Latitude, Longitude) %>%
+  summarise(across(all_of(species_cols), ~mean(.x, na.rm = TRUE)),
+            .groups = "drop")
+
+site_long <- site_avg %>%
+  pivot_longer(all_of(species_cols), names_to = "species", values_to = "biomass") %>%
+  mutate(common = species_labels[species],
+         group  = species_info$group[match(species, species_info$code)])
+
+ggplot(site_long, aes(x = Longitude, y = Latitude, color = biomass + 1)) +
+  geom_point(size = 1.2, alpha = 0.8) +
+  scale_color_viridis_c(option = "C", trans = "log10", name = "Biomass\n(g/100m²)") +
+  facet_wrap(~common, ncol = 2) +
+  coord_quickmap() +
+  labs(title = "Spatial Distribution — Fish Family Biomass") +
+  theme_hri() +
+  theme(axis.text.x = element_text(angle = 0, size = 8))
+```
+
+### Latitude gradients by species
+
+```{r species-latitude-gradient}
+#| fig-height: 8
+site_long %>%
+  mutate(lat_band = cut(Latitude, breaks = 5, labels = c("South", "S-Mid",
+                                                           "Central", "N-Mid", "North"))) %>%
+  ggplot(aes(x = lat_band, y = biomass + 1, fill = group)) +
+  geom_boxplot(alpha = 0.7, outlier.size = 0.5) +
+  scale_y_log10(labels = scales::comma) +
+  scale_fill_manual(values = group_colors) +
+  facet_wrap(~common, scales = "free_y", ncol = 2) +
+  labs(x = "Latitude Band", y = "Biomass (g/100m², log)", fill = "Group",
+       title = "Latitude Gradients by Species") +
+  theme_hri()
+```
+
+## Dominance and Evenness
+
+### Which families dominate at each site?
+
+```{r dominance-analysis}
+#| fig-height: 6
+dominant <- site_avg %>%
+  pivot_longer(all_of(species_cols), names_to = "species", values_to = "biomass") %>%
+  group_by(Name, Latitude, Longitude) %>%
+  slice_max(biomass, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(common = species_labels[species])
+
+ggplot(dominant, aes(x = Longitude, y = Latitude, color = common)) +
+  geom_point(size = 2, alpha = 0.8) +
+  scale_color_brewer(palette = "Set2") +
+  coord_quickmap() +
+  labs(color = "Dominant Family",
+       title = "Dominant Fish Family by Site") +
+  theme_hri()
+```
+
+```{r dominance-table}
+dominant %>%
+  count(common) %>%
+  mutate(pct = round(100 * n / sum(n), 1)) %>%
+  arrange(desc(n)) %>%
+  knitr::kable(col.names = c("Dominant Family", "Sites", "% of Sites"))
+```
+
+### Simpson's evenness across families
+
+```{r evenness}
+#| fig-height: 5
+evenness <- site_avg %>%
+  rowwise() %>%
+  mutate(
+    total = sum(c_across(all_of(species_cols)), na.rm = TRUE),
+    simpson_d = 1 - sum((c_across(all_of(species_cols)) / total)^2, na.rm = TRUE),
+    evenness = simpson_d / (1 - 1/7)  # normalized by max possible
+  ) %>%
+  ungroup()
+
+ggplot(evenness, aes(x = Longitude, y = Latitude, color = evenness)) +
+  geom_point(size = 2, alpha = 0.8) +
+  scale_color_viridis_c(option = "D", name = "Evenness") +
+  coord_quickmap() +
+  labs(title = "Fish Community Evenness (Simpson's)") +
+  theme_hri()
+```
+
+## Predictor Relationships
+
+### Species biomass vs bathymetric predictors
+
+```{r species-vs-predictors}
+#| fig-height: 10
+hri <- read.csv(here("data", "external", "HRI_all_variables.csv"))
+
+# Merge individual species with predictors on coordinates
+site_pred <- site_avg %>%
+  inner_join(
+    hri %>% rename(Longitude = Longitude_, Latitude = Latitude_y),
+    by = c("Longitude", "Latitude")
+  )
+
+# Depth relationships
+depth_long <- site_pred %>%
+  select(depth, all_of(species_cols)) %>%
+  pivot_longer(-depth, names_to = "species", values_to = "biomass") %>%
+  mutate(common = species_labels[species])
+
+ggplot(depth_long, aes(x = depth, y = biomass + 1)) +
+  geom_point(alpha = 0.3, size = 1, color = "#2C3E50") +
+  geom_smooth(method = "loess", color = "#E74C3C", se = TRUE, alpha = 0.2) +
+  scale_y_log10(labels = scales::comma) +
+  facet_wrap(~common, scales = "free_y", ncol = 2) +
+  labs(x = "Depth (m)", y = "Biomass (g/100m², log scale)",
+       title = "Fish Family Biomass vs Depth") +
+  theme_hri() +
+  theme(axis.text.x = element_text(angle = 0))
+```
+
+### Slope relationships
+
+```{r species-vs-slope}
+#| fig-height: 10
+slope_long <- site_pred %>%
+  select(slope, all_of(species_cols)) %>%
+  pivot_longer(-slope, names_to = "species", values_to = "biomass") %>%
+  mutate(common = species_labels[species])
+
+ggplot(slope_long, aes(x = slope, y = biomass + 1)) +
+  geom_point(alpha = 0.3, size = 1, color = "#2C3E50") +
+  geom_smooth(method = "loess", color = "#E74C3C", se = TRUE, alpha = 0.2) +
+  scale_y_log10(labels = scales::comma) +
+  facet_wrap(~common, scales = "free_y", ncol = 2) +
+  labs(x = "Terrain Slope", y = "Biomass (g/100m², log scale)",
+       title = "Fish Family Biomass vs Slope") +
+  theme_hri() +
+  theme(axis.text.x = element_text(angle = 0))
+```
+
+## Summary
+
+```{r summary-table}
+fish_long %>%
+  group_by(common, group) %>%
+  summarise(
+    `Mean biomass` = round(mean(biomass, na.rm = TRUE), 1),
+    `Dominant at n sites` = sum(dominant$common == first(common)),
+    .groups = "drop"
+  ) %>%
+  arrange(group, desc(`Mean biomass`)) %>%
+  knitr::kable()
+```
+
+**Key observations:**
+
+-   Individual species show distinct spatial patterns not captured by grouped totals
+-   Parrotfish and Grunts tend to dominate biomass at most sites
+-   Species-specific depth preferences suggest niche partitioning along the depth gradient
+-   Pairwise correlations among families reveal both positive (co-occurrence) and negative (competitive exclusion) relationships
+-   Community evenness varies spatially, with potential north-south gradients along the barrier reef
+

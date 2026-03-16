@@ -1,0 +1,123 @@
+---
+title: "Use of AI in this project"
+format:
+  pdf:
+    documentclass: article
+    papersize: letter
+    margin-left: 1in
+    margin-right: 1in
+  html:
+    toc: true
+editor: visual
+---
+
+## Overview
+
+This project uses **Claude Code** (Anthropic's CLI agent, model: Claude Opus 4.6)
+as a collaborative software engineering tool for code restructuring, data
+processing pipeline development, exploratory data analysis, and Bayesian
+spatial modeling. All AI-assisted work is conducted interactively with human
+direction, review, and domain expertise guiding decisions.
+
+Claude Code operates as an agentic coding assistant — it reads and writes files,
+runs shell commands, and executes R scripts, but all changes are reviewed and
+approved by the researcher before being committed.
+
+## Timeline
+
+| Date       | Session focus                                    | Key outputs                                     |
+|------------|--------------------------------------------------|-------------------------------------------------|
+| 2026-03-15 | Full project restructuring, bug fixes, EDA, spatial modeling, stakeholder dashboard | Modular pipeline (scripts 00–04), comprehensive EDA (HTML/PDF/slides), spAbundance multi-species models, interactive HTML dashboard |
+
+## Software engineering contributions
+
+### Code restructuring and bug fixes (2026-03-15)
+
+Claude Code decomposed a monolithic 479-line R script (`Data_base_construction.R`)
+into a modular, numbered pipeline following PAWPAWS directory conventions:
+
+- **`code/00_functions.R`** — Extracted repeated patterns into documented helper
+  functions (`load_belize_data()`, `ensure_dirs()`, `theme_hri()`) with
+  roxygen-style documentation.
+- **`code/01–04_*.R`** — Four processing scripts, each with a clear input/output
+  contract, inline comments, and section headers.
+- **`code/run_all.R`** — Master runner that sources the pipeline in order.
+
+Six bugs were identified and fixed during decomposition, including:
+
+- **Data integrity fix**: Pre-2023 herbivorous fish data had Parrotfish (PARR)
+  and Surgeonfish (SURG) systematically swapped in the rename mapping. This
+  affected all 2018 and 2021 records.
+- **Formula fix**: Herbivorous biomass was calculated as mean + SD instead of
+  mean + mean, producing incorrect totals.
+- **Portability**: All hardcoded Windows/Google Drive paths replaced with
+  `here::here()` for cross-platform reproducibility.
+
+### Exploratory data analysis (2026-03-15)
+
+Claude Code created comprehensive EDA documents in Quarto format:
+
+- **Prose document** (`code/05_eda.qmd`) — rendered to HTML and PDF with
+  collapsible code blocks, covering data overview, benthic cover distributions
+  and trends, fish biomass by family, response variable correlations, spatial
+  distribution maps, and predictor variable collinearity analysis.
+- **Presentation slides** (`code/05_eda_slides.qmd`) — 15-slide revealjs deck
+  covering the same analyses in presentation format.
+
+### Bayesian spatial modeling (2026-03-15)
+
+Claude Code implemented multi-species spatial abundance models using the
+`spAbundance` R package:
+
+- **Model specification**: 4 response variables (coral cover, macroalgae cover,
+  log commercial fish biomass, log herbivorous fish biomass) modeled jointly as
+  a function of 6 bathymetric/oceanographic predictors across 227 reef sites.
+- **Two models**: Non-spatial baseline (`msAbund`) and spatial factor model
+  (`sfMsAbund`) with Nearest Neighbor Gaussian Processes, 2 latent factors,
+  and exponential covariance.
+- **Outputs**: Coefficient estimates, species correlation matrix, residual
+  diagnostics, observed vs. fitted plots, and spatial prediction surfaces at
+  267 sites.
+
+### Interactive stakeholder dashboard (2026-03-15)
+
+Claude Code created a standalone HTML dashboard (`results/dashboard.html`) for
+fishing industry stakeholders to explore model predictions without any software
+installation. The dashboard embeds all 228 prediction sites as inline JSON and
+uses CDN-loaded libraries (Leaflet, Chart.js) to provide:
+
+- Interactive map of the Belize Barrier Reef with color-coded site markers
+  (switchable between coral, macroalgae, commercial fish, herbivorous fish)
+- Summary statistics with distribution histograms, scatter plots, and
+  latitude-band trends
+- Model coefficient visualizations with 95% credible intervals
+- Searchable, sortable data table of all predicted values
+
+### Documentation (2026-03-15)
+
+- Rewrote `README.md` with project structure, pipeline diagram, and quick start
+- Created `docs/data_dictionary.md` with full variable definitions
+- Created `docs/methods.md` with AGRRA methodology details
+- Created `data/external/README.md` with external data provenance
+
+## What AI was not used for
+
+- **Scientific interpretation** — Ecological hypotheses, species selection, and
+  interpretation of model results are the researcher's domain expertise.
+- **Study design** — Survey methodology, site selection, and AGRRA protocols
+  were established by HRI prior to this project.
+- **Data collection** — All field data was collected by HRI survey teams.
+- **Model selection rationale** — The choice of `spAbundance` and the
+  multi-species spatial factor approach was directed by the researcher based
+  on ecological theory and the spatial structure of the data.
+
+## Reproducibility
+
+- **Session logs** are maintained in `docs/session_logs/` following the
+  PAWPAWS framework convention (`claude_session_log_YYYY-MM-DD.md`).
+- **Claude Code transcripts** (JSONL format) are stored in
+  `~/.claude/projects/` and can be parsed by `pawpaws_ingest` for
+  additional detail.
+- All AI-generated code was tested by running the complete pipeline
+  (`source("code/run_all.R")`) and verifying outputs match expected
+  dimensions and value ranges.

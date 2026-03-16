@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Belize Reef Health Dashboard — HRI/AGRRA</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0f172a; --surface: #1e293b; --border: #334155;
+  --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8;
+  --coral: #f97316; --algae: #22c55e; --comm: #a78bfa; --herb: #facc15;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+header {
+  background: linear-gradient(135deg, #0c4a6e 0%, #164e63 100%);
+  padding: 1.2rem 2rem; display: flex; align-items: center; gap: 1.5rem;
+  border-bottom: 2px solid var(--accent);
+}
+header h1 { font-size: 1.4rem; font-weight: 600; }
+header p { color: var(--muted); font-size: 0.85rem; }
+.tabs {
+  display: flex; gap: 0; background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0 1rem;
+}
+.tab {
+  padding: 0.75rem 1.5rem; cursor: pointer; color: var(--muted);
+  border-bottom: 2px solid transparent; font-size: 0.9rem; transition: all 0.2s;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* Map panel */
+#map-panel { display: none; }
+#map-panel.active { display: flex; height: calc(100vh - 110px); }
+#map { flex: 1; }
+.map-sidebar {
+  width: 340px; background: var(--surface); padding: 1.2rem; overflow-y: auto;
+  border-left: 1px solid var(--border);
+}
+.map-sidebar h3 { font-size: 0.95rem; margin-bottom: 0.8rem; color: var(--accent); }
+.var-btn {
+  display: block; width: 100%; padding: 0.6rem 0.8rem; margin-bottom: 0.4rem;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); cursor: pointer; text-align: left; font-size: 0.85rem;
+  transition: all 0.15s;
+}
+.var-btn:hover { border-color: var(--accent); }
+.var-btn.active { border-color: var(--accent); background: rgba(56,189,248,0.1); }
+.legend { margin-top: 1rem; }
+.legend-bar {
+  height: 16px; border-radius: 4px; margin: 0.4rem 0;
+  background: linear-gradient(to right, #2563eb, #22d3ee, #22c55e, #eab308, #ef4444);
+}
+.legend-labels { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--muted); }
+.site-info { margin-top: 1rem; padding: 0.8rem; background: var(--bg); border-radius: 6px; font-size: 0.82rem; }
+.site-info h4 { color: var(--accent); margin-bottom: 0.4rem; }
+.site-info .row { display: flex; justify-content: space-between; padding: 0.2rem 0; }
+.site-info .label { color: var(--muted); }
+
+/* Summary panel */
+#summary-panel { padding: 1.5rem; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+.card {
+  background: var(--surface); border-radius: 8px; padding: 1.2rem;
+  border: 1px solid var(--border);
+}
+.card .value { font-size: 1.8rem; font-weight: 700; }
+.card .label { font-size: 0.8rem; color: var(--muted); margin-top: 0.2rem; }
+.card.coral .value { color: var(--coral); }
+.card.algae .value { color: var(--algae); }
+.card.comm .value { color: var(--comm); }
+.card.herb .value { color: var(--herb); }
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+.chart-box {
+  background: var(--surface); border-radius: 8px; padding: 1.2rem;
+  border: 1px solid var(--border);
+}
+.chart-box h3 { font-size: 0.9rem; margin-bottom: 0.8rem; color: var(--accent); }
+
+/* Model panel */
+#model-panel { padding: 1.5rem; }
+.model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+
+/* Data table panel */
+#data-panel { padding: 1.5rem; }
+#data-panel input {
+  width: 100%; padding: 0.6rem 1rem; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+  margin-bottom: 1rem; font-size: 0.9rem;
+}
+#data-panel input::placeholder { color: var(--muted); }
+#data-table-wrap { overflow-x: auto; max-height: calc(100vh - 200px); overflow-y: auto; }
+table {
+  width: 100%; border-collapse: collapse; font-size: 0.82rem;
+}
+th {
+  position: sticky; top: 0; background: var(--surface); padding: 0.6rem 0.8rem;
+  text-align: left; border-bottom: 2px solid var(--accent); color: var(--accent);
+  cursor: pointer; white-space: nowrap;
+}
+th:hover { color: var(--text); }
+td { padding: 0.5rem 0.8rem; border-bottom: 1px solid var(--border); }
+tr:hover td { background: rgba(56,189,248,0.05); }
+
+/* About panel */
+#about-panel { padding: 2rem; max-width: 800px; }
+#about-panel h2 { color: var(--accent); margin-bottom: 1rem; }
+#about-panel p, #about-panel li { color: var(--muted); line-height: 1.7; font-size: 0.9rem; margin-bottom: 0.6rem; }
+#about-panel ul { padding-left: 1.2rem; }
+#about-panel strong { color: var(--text); }
+
+@media (max-width: 900px) {
+  .chart-grid, .model-grid { grid-template-columns: 1fr; }
+  #map-panel.active { flex-direction: column; }
+  .map-sidebar { width: 100%; max-height: 240px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Belize Barrier Reef — Coral & Fish Prediction Dashboard</h1>
+    <p>Smithsonian HRI / AGRRA &nbsp;|&nbsp; 228 survey sites &nbsp;|&nbsp; Bayesian spatial model predictions</p>
+  </div>
+</header>
+
+<div class="tabs">
+  <div class="tab active" data-tab="map-panel">Map</div>
+  <div class="tab" data-tab="summary-panel">Summary</div>
+  <div class="tab" data-tab="model-panel">Model Results</div>
+  <div class="tab" data-tab="data-panel">Data Table</div>
+  <div class="tab" data-tab="about-panel">About</div>
+</div>
+
+<!-- MAP -->
+<div id="map-panel" class="panel active">
+  <div id="map"></div>
+  <div class="map-sidebar">
+    <h3>Display Variable</h3>
+    <button class="var-btn active" data-var="coral">Coral Cover (%)</button>
+    <button class="var-btn" data-var="algae">Macroalgae Cover (%)</button>
+    <button class="var-btn" data-var="fish_comm">Commercial Fish Biomass (g/100m²)</button>
+    <button class="var-btn" data-var="fish_herb">Herbivorous Fish Biomass (g/100m²)</button>
+    <div class="legend">
+      <div style="font-size:0.8rem;color:var(--muted);">Low → High</div>
+      <div class="legend-bar"></div>
+      <div class="legend-labels"><span id="leg-min"></span><span id="leg-max"></span></div>
+    </div>
+    <div class="site-info" id="site-info">
+      <h4>Click a site for details</h4>
+    </div>
+  </div>
+</div>
+
+<!-- SUMMARY -->
+<div id="summary-panel" class="panel">
+  <div class="cards" id="stat-cards"></div>
+  <div class="chart-grid">
+    <div class="chart-box"><h3>Distribution of Predicted Values</h3><canvas id="histChart"></canvas></div>
+    <div class="chart-box"><h3>Coral Cover vs Macroalgae Cover</h3><canvas id="scatterChart"></canvas></div>
+    <div class="chart-box"><h3>Commercial vs Herbivorous Fish Biomass</h3><canvas id="fishScatter"></canvas></div>
+    <div class="chart-box"><h3>Predicted Values by Latitude Band</h3><canvas id="latChart"></canvas></div>
+  </div>
+</div>
+
+<!-- MODEL -->
+<div id="model-panel" class="panel">
+  <div class="model-grid">
+    <div class="chart-box"><h3>Species-Specific Coefficients (with 95% CI)</h3><canvas id="coefChart"></canvas></div>
+    <div class="chart-box"><h3>Community-Level Effects</h3><canvas id="commCoefChart"></canvas></div>
+    <div class="chart-box"><h3>Residual SD: Non-Spatial (M1) vs Spatial (M2)</h3><canvas id="residChart"></canvas></div>
+    <div class="chart-box"><h3>Improvement from Spatial Model (%)</h3><canvas id="improvChart"></canvas></div>
+  </div>
+</div>
+
+<!-- DATA TABLE -->
+<div id="data-panel" class="panel">
+  <input type="text" id="table-search" placeholder="Search sites by name, reef type, or coordinates..." />
+  <div id="data-table-wrap">
+    <table id="data-table">
+      <thead><tr></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ABOUT -->
+<div id="about-panel" class="panel">
+  <h2>About This Dashboard</h2>
+  <p>This interactive tool presents predictions from a <strong>Bayesian spatial multi-species abundance model</strong> fitted to coral reef survey data from the Belize Barrier Reef system.</p>
+  <p><strong>Data Sources:</strong></p>
+  <ul>
+    <li>Healthy Reefs Initiative (HRI) 2023 reef surveys</li>
+    <li>Atlantic & Gulf Rapid Reef Assessment (AGRRA) 2011–2021 baseline</li>
+    <li>Bathymetric predictors from TNC 10m resolution rasters</li>
+  </ul>
+  <p><strong>Response Variables (4):</strong></p>
+  <ul>
+    <li><strong>Coral Cover (%)</strong> — live stony coral percentage</li>
+    <li><strong>Macroalgae Cover (%)</strong> — fleshy macroalgae percentage (indicator of reef degradation)</li>
+    <li><strong>Commercial Fish Biomass</strong> — snappers, groupers, jacks, barracuda, grunts (g/100m²)</li>
+    <li><strong>Herbivorous Fish Biomass</strong> — parrotfish + surgeonfish (g/100m²)</li>
+  </ul>
+  <p><strong>Model:</strong> Spatial factor multi-species GLMM (sfMsAbund from spAbundance R package) with NNGP spatial random effects, exponential covariance, and predictors: depth, depth², slope, aspect (N-S, E-W), and terrain roughness.</p>
+  <p><strong>Key Finding:</strong> The spatial model reduced prediction error for fish biomass by 20–25%, indicating strong spatial autocorrelation in reef fish communities along the Belize Barrier Reef.</p>
+</div>
+
+<script>
+// ===== EMBEDDED DATA =====
+const predictions = [
+  {lon:-88.28024,lat:15.95446,coral:32.37,algae:22.05,fish_comm:191,fish_herb:888,name:"Corona Caiman"},
+  {lon:-88.2802,lat:15.9545,coral:32.19,algae:22.13,fish_comm:193,fish_herb:915,name:"Corona Caiman"},
+  {lon:-88.2985,lat:15.9695,coral:12.43,algae:22.99,fish_comm:327,fish_herb:995,name:"Corona Caiman sensor temp"},
+  {lon:-88.29851,lat:15.96953,coral:12.73,algae:22.80,fish_comm:339,fish_herb:1022,name:"Corona Caiman sensor temp"},
+  {lon:-88.3011,lat:16.0682,coral:17.44,algae:16.20,fish_comm:501,fish_herb:2466,name:"Rise & Fall"},
+  {lon:-88.3299,lat:16.1041,coral:17.20,algae:13.43,fish_comm:837,fish_herb:3007,name:"White Reef"},
+  {lon:-88.32987,lat:16.10412,coral:16.84,algae:13.44,fish_comm:819,fish_herb:3001,name:"South Tip of Sapodillas"},
+  {lon:-88.256,lat:16.1123,coral:15.80,algae:15.31,fish_comm:842,fish_herb:2883,name:"Nicholas Caye"},
+  {lon:-88.3787,lat:16.1237,coral:15.83,algae:16.39,fish_comm:551,fish_herb:2076,name:"Seal Caye"},
+  {lon:-88.37861,lat:16.12373,coral:16.02,algae:16.40,fish_comm:554,fish_herb:2006,name:"Southwest of Seal Caye"},
+  {lon:-88.2429,lat:16.1506,coral:14.84,algae:14.88,fish_comm:1190,fish_herb:2752,name:"Preservation Zone"},
+  {lon:-88.59154,lat:16.15347,coral:16.60,algae:17.26,fish_comm:119,fish_herb:837,name:"Bank 3"},
+  {lon:-88.3729,lat:16.1548,coral:15.98,algae:15.46,fish_comm:506,fish_herb:1799,name:"Southwest of Seal Caye"},
+  {lon:-88.3299,lat:16.1548,coral:17.80,algae:16.39,fish_comm:405,fish_herb:1915,name:"Nothing Special"},
+  {lon:-88.4102,lat:16.1595,coral:15.78,algae:15.11,fish_comm:406,fish_herb:1725,name:"BZPHMR02"},
+  {lon:-88.41018,lat:16.15952,coral:15.70,algae:15.04,fish_comm:404,fish_herb:1713,name:"Spanish Bank"},
+  {lon:-88.34,lat:16.1791,coral:15.94,algae:12.44,fish_comm:645,fish_herb:2786,name:"Coral Forest"},
+  {lon:-88.56445,lat:16.17914,coral:16.97,algae:16.10,fish_comm:258,fish_herb:972,name:"South Snake Caye"},
+  {lon:-88.63641,lat:16.17925,coral:13.93,algae:17.71,fish_comm:178,fish_herb:971,name:"Frenchman"},
+  {lon:-88.55684,lat:16.17936,coral:15.04,algae:14.63,fish_comm:580,fish_herb:1834,name:"Bank 2"},
+  {lon:-88.56981,lat:16.18875,coral:17.33,algae:14.77,fish_comm:253,fish_herb:1199,name:"West Snake Caye"},
+  {lon:-88.55112,lat:16.20153,coral:16.44,algae:15.01,fish_comm:588,fish_herb:1771,name:"Middle Snake Caye"},
+  {lon:-88.50809,lat:16.20594,coral:17.06,algae:14.09,fish_comm:915,fish_herb:3450,name:"East Snake Caye"},
+  {lon:-88.58796,lat:16.22111,coral:15.49,algae:14.49,fish_comm:897,fish_herb:2920,name:"Wilson Caye"},
+  {lon:-88.176,lat:16.2472,coral:16.37,algae:19.41,fish_comm:454,fish_herb:1167,name:"Site 16.2472"},
+  {lon:-88.17989,lat:16.24728,coral:14.52,algae:18.09,fish_comm:253,fish_herb:1103,name:"Site 16.2473"},
+  {lon:-88.34744,lat:16.33055,coral:16.83,algae:17.55,fish_comm:175,fish_herb:1136,name:"Daly Bank"},
+  {lon:-88.1497,lat:16.331,coral:18.19,algae:14.06,fish_comm:530,fish_herb:2058,name:"Ranguana"},
+  {lon:-88.0892,lat:16.3731,coral:16.00,algae:20.32,fish_comm:905,fish_herb:1817,name:"Pompion"},
+  {lon:-88.0413,lat:16.4185,coral:14.92,algae:20.01,fish_comm:113,fish_herb:687,name:"Round Caye"},
+  {lon:-88.206,lat:16.4279,coral:16.08,algae:17.67,fish_comm:470,fish_herb:1523,name:"Laughing Bird Caye 1"},
+  {lon:-88.20604,lat:16.42794,coral:16.30,algae:17.44,fish_comm:493,fish_herb:1532,name:"Laughing Bird 1"},
+  {lon:-88.1978,lat:16.4438,coral:15.65,algae:15.89,fish_comm:496,fish_herb:1960,name:"Laughing Bird Caye 2"},
+  {lon:-88.19778,lat:16.44383,coral:15.79,algae:16.37,fish_comm:494,fish_herb:1918,name:"Laughing Bird 2"},
+  {lon:-88.04171,lat:16.45231,coral:16.37,algae:16.77,fish_comm:390,fish_herb:1465,name:"Gladden Spit"},
+  {lon:-88.2097,lat:16.4563,coral:16.14,algae:19.93,fish_comm:623,fish_herb:2256,name:"West of Laughing Bird Caye"},
+  {lon:-88.2093,lat:16.45676,coral:15.15,algae:16.81,fish_comm:722,fish_herb:2154,name:"West of Laughing Bird Caye"},
+  {lon:-88.3236,lat:16.4903,coral:15.35,algae:15.44,fish_comm:480,fish_herb:1978,name:"Bugle's Caye"},
+  {lon:-88.1685,lat:16.4953,coral:15.22,algae:17.07,fish_comm:440,fish_herb:1484,name:"Traps Caye"},
+  {lon:-87.9707,lat:16.5079,coral:14.53,algae:19.72,fish_comm:384,fish_herb:1464,name:"Big White-Gladden Channel"},
+  {lon:-88.19352,lat:16.51746,coral:16.74,algae:15.55,fish_comm:370,fish_herb:1305,name:"Carrie Caye"},
+  {lon:-88.1935,lat:16.5175,coral:17.02,algae:15.78,fish_comm:354,fish_herb:1301,name:"Carrie Caye"},
+  {lon:-88.19308,lat:16.51861,coral:14.02,algae:17.58,fish_comm:352,fish_herb:1236,name:"Carrie Caye"},
+  {lon:-88.1996,lat:16.5509,coral:16.17,algae:16.92,fish_comm:224,fish_herb:890,name:"Baker Caye"},
+  {lon:-88.0507,lat:16.558,coral:17.68,algae:15.40,fish_comm:599,fish_herb:1947,name:"Gladden Caye"},
+  {lon:-88.3342,lat:16.6034,coral:15.72,algae:18.63,fish_comm:214,fish_herb:1051,name:"False Caye"},
+  {lon:-88.2061,lat:16.6302,coral:16.97,algae:11.56,fish_comm:604,fish_herb:2395,name:"South Water Caye"},
+  {lon:-88.0662,lat:16.64572,coral:15.40,algae:15.76,fish_comm:831,fish_herb:2643,name:"South of Carrie Bow Caye"},
+  {lon:-88.0956,lat:16.6584,coral:14.99,algae:18.20,fish_comm:567,fish_herb:1553,name:"NE Range"},
+  {lon:-87.8387,lat:16.72,coral:17.47,algae:16.48,fish_comm:455,fish_herb:1717,name:"Glover's Reef Southwest"},
+  {lon:-88.1485,lat:16.7365,coral:16.65,algae:14.31,fish_comm:449,fish_herb:1385,name:"South Water Caye Reef"},
+  {lon:-87.80771,lat:16.73689,coral:15.99,algae:20.39,fish_comm:518,fish_herb:1156,name:"CZFR2"},
+  {lon:-87.8077,lat:16.7369,coral:15.87,algae:20.96,fish_comm:516,fish_herb:1137,name:"CZFR2"},
+  {lon:-87.85077,lat:16.74339,coral:16.40,algae:15.29,fish_comm:651,fish_herb:1785,name:"Southwest Glovers Patch"},
+  {lon:-87.8508,lat:16.7434,coral:16.21,algae:15.13,fish_comm:739,fish_herb:2043,name:"Southwest Glover's Patch"},
+  {lon:-87.8214,lat:16.75118,coral:14.46,algae:19.72,fish_comm:523,fish_herb:1350,name:"North of Middle Caye"},
+  {lon:-87.82139,lat:16.75118,coral:14.77,algae:19.37,fish_comm:505,fish_herb:1363,name:"North of Middle Caye"},
+  {lon:-87.8214,lat:16.7512,coral:14.33,algae:19.60,fish_comm:530,fish_herb:1359,name:"North of Middle Caye"},
+  {lon:-88.1442,lat:16.7574,coral:17.58,algae:13.90,fish_comm:567,fish_herb:2028,name:"Wee Wee Cay"},
+  {lon:-88.14417,lat:16.75744,coral:17.49,algae:13.47,fish_comm:564,fish_herb:1979,name:"Near Wee Wee Caye"},
+  {lon:-88.07356,lat:16.76079,coral:16.39,algae:19.29,fish_comm:545,fish_herb:1300,name:"SWCGUZFR6"},
+  {lon:-88.0736,lat:16.7608,coral:16.02,algae:19.17,fish_comm:541,fish_herb:1276,name:"SWCGUZFR6"},
+  {lon:-87.80431,lat:16.76369,coral:16.90,algae:19.81,fish_comm:51,fish_herb:337,name:"Site 16.764"},
+  {lon:-88.0761,lat:16.76494,coral:17.71,algae:17.78,fish_comm:234,fish_herb:1298,name:"South of Curlew"},
+  {lon:-88.07501,lat:16.76858,coral:16.19,algae:18.57,fish_comm:251,fish_herb:1234,name:"SWCGUZFR5"},
+  {lon:-88.075,lat:16.7686,coral:16.48,algae:18.59,fish_comm:260,fish_herb:1227,name:"SWCGUZFR5"},
+  {lon:-87.8716,lat:16.7705,coral:17.10,algae:13.68,fish_comm:990,fish_herb:2666,name:"Glover's Reef"},
+  {lon:-88.07501,lat:16.77758,coral:15.61,algae:21.49,fish_comm:338,fish_herb:862,name:"SWCGUZFR4"},
+  {lon:-88.075,lat:16.7776,coral:15.56,algae:21.50,fish_comm:318,fish_herb:894,name:"SWCGUZFR4"},
+  {lon:-87.75241,lat:16.7841,coral:15.01,algae:17.59,fish_comm:602,fish_herb:2066,name:"Glovers Reef"},
+  {lon:-87.7524,lat:16.7841,coral:15.09,algae:17.11,fish_comm:598,fish_herb:2045,name:"Glovers Reef"},
+  {lon:-88.07572,lat:16.78895,coral:15.62,algae:21.27,fish_comm:372,fish_herb:935,name:"SWCGUZFR3"},
+  {lon:-88.0757,lat:16.789,coral:15.41,algae:21.56,fish_comm:377,fish_herb:947,name:"SWCGUZFR3"},
+  {lon:-88.07774,lat:16.8131,coral:14.33,algae:22.39,fish_comm:188,fish_herb:906,name:"SWCCZFR6"},
+  {lon:-88.0777,lat:16.8131,coral:15.19,algae:22.03,fish_comm:251,fish_herb:787,name:"SWCCZFR6"},
+  {lon:-87.85217,lat:16.81538,coral:17.28,algae:12.71,fish_comm:1167,fish_herb:2903,name:"Site 16.815"},
+  {lon:-88.07736,lat:16.81828,coral:15.38,algae:23.08,fish_comm:271,fish_herb:739,name:"SWCCZFR5"},
+  {lon:-88.0774,lat:16.8183,coral:15.33,algae:22.85,fish_comm:281,fish_herb:737,name:"SWCCZFR5"},
+  {lon:-88.07456,lat:16.83489,coral:15.38,algae:22.56,fish_comm:454,fish_herb:1016,name:"SWCCZFR4"},
+  {lon:-88.0746,lat:16.8349,coral:15.61,algae:22.44,fish_comm:450,fish_herb:1013,name:"SWCCZFR4"},
+  {lon:-87.84392,lat:16.83796,coral:17.49,algae:13.83,fish_comm:1613,fish_herb:3298,name:"Site 16.838"},
+  {lon:-88.0709,lat:16.8499,coral:15.72,algae:21.72,fish_comm:717,fish_herb:1466,name:"SWCCZFR3"},
+  {lon:-88.07088,lat:16.84992,coral:15.57,algae:22.03,fish_comm:751,fish_herb:1438,name:"SWCCZFR3"},
+  {lon:-88.0649,lat:16.8679,coral:15.17,algae:23.14,fish_comm:450,fish_herb:990,name:"SWCCZFR2"},
+  {lon:-88.06493,lat:16.86792,coral:15.58,algae:23.32,fish_comm:444,fish_herb:1004,name:"SWCCZFR2"},
+  {lon:-88.06055,lat:16.88466,coral:25.43,algae:27.48,fish_comm:536,fish_herb:1265,name:"SWCCZFR1"},
+  {lon:-88.0606,lat:16.8847,coral:25.10,algae:27.99,fish_comm:521,fish_herb:1266,name:"SWCCZFR1"},
+  {lon:-87.703,lat:16.8853,coral:18.45,algae:14.64,fish_comm:294,fish_herb:1490,name:"Glover's Reef Northeast"},
+  {lon:-87.70304,lat:16.88532,coral:18.59,algae:14.91,fish_comm:288,fish_herb:1459,name:"Glover's Northeast"},
+  {lon:-87.8102,lat:16.8856,coral:14.76,algae:16.28,fish_comm:730,fish_herb:1980,name:"Glover's NW"},
+  {lon:-87.7801,lat:16.8864,coral:15.44,algae:19.07,fish_comm:97,fish_herb:723,name:"Glover's North Inner Patch"},
+  {lon:-87.78005,lat:16.88644,coral:15.18,algae:19.08,fish_comm:97,fish_herb:715,name:"Glover's North Inner Patch"},
+  {lon:-88.0542,lat:16.9036,coral:30.03,algae:28.88,fish_comm:395,fish_herb:1248,name:"SWCGUZFR2"},
+  {lon:-88.05419,lat:16.90361,coral:30.14,algae:28.55,fish_comm:389,fish_herb:1266,name:"SWCGUZFR2"},
+  {lon:-88.0499,lat:16.9142,coral:22.03,algae:24.39,fish_comm:408,fish_herb:1368,name:"SWCGUZFR1"},
+  {lon:-88.04989,lat:16.91421,coral:21.76,algae:24.34,fish_comm:414,fish_herb:1338,name:"SWCGUZFR1"},
+  {lon:-87.9878,lat:17.0853,coral:16.89,algae:16.35,fish_comm:1107,fish_herb:2209,name:"Caye Glory"},
+  {lon:-88.0077,lat:17.0975,coral:17.69,algae:12.99,fish_comm:541,fish_herb:2376,name:"Caye Glory"},
+  {lon:-87.6208,lat:17.1242,coral:15.84,algae:21.92,fish_comm:339,fish_herb:879,name:"LHRA"},
+  {lon:-87.615,lat:17.129,coral:16.11,algae:19.64,fish_comm:182,fish_herb:797,name:"Lighthouse"},
+  {lon:-87.6064,lat:17.131,coral:15.36,algae:18.52,fish_comm:217,fish_herb:879,name:"LHRA"},
+  {lon:-87.60639,lat:17.13101,coral:15.59,algae:18.22,fish_comm:214,fish_herb:879,name:"LHRA"},
+  {lon:-87.603,lat:17.132,coral:17.36,algae:16.17,fish_comm:182,fish_herb:1071,name:"Site 17.132"},
+  {lon:-87.6206,lat:17.1352,coral:13.66,algae:20.33,fish_comm:198,fish_herb:911,name:"LHRA"},
+  {lon:-87.62064,lat:17.13524,coral:15.58,algae:19.29,fish_comm:174,fish_herb:905,name:"LHRA"},
+  {lon:-87.59994,lat:17.15318,coral:15.42,algae:16.58,fish_comm:501,fish_herb:1664,name:"South Point Wreck Site"},
+  {lon:-87.90921,lat:17.15698,coral:15.46,algae:17.18,fish_comm:1019,fish_herb:2394,name:"CB-SFR"},
+  {lon:-87.9092,lat:17.157,coral:15.81,algae:17.08,fish_comm:1006,fish_herb:2402,name:"CBSFR"},
+  {lon:-87.9079,lat:17.157,coral:16.82,algae:16.57,fish_comm:995,fish_herb:1925,name:"CBDFR"},
+  {lon:-87.91022,lat:17.15853,coral:16.59,algae:13.43,fish_comm:600,fish_herb:2187,name:"CB-BR"},
+  {lon:-87.6317,lat:17.1692,coral:16.47,algae:17.57,fish_comm:839,fish_herb:1781,name:"West of Hat Caye"},
+  {lon:-87.61214,lat:17.18617,coral:16.42,algae:16.60,fish_comm:255,fish_herb:1135,name:"LHRA"},
+  {lon:-87.6121,lat:17.1862,coral:16.41,algae:15.84,fish_comm:259,fish_herb:1123,name:"LHRA"},
+  {lon:-87.9318,lat:17.19558,coral:13.67,algae:17.38,fish_comm:668,fish_herb:2183,name:"Sianora Dive Site"},
+  {lon:-87.52493,lat:17.20319,coral:16.39,algae:18.41,fish_comm:587,fish_herb:1317,name:"LHRA"},
+  {lon:-87.5422,lat:17.2032,coral:16.38,algae:18.76,fish_comm:1318,fish_herb:2396,name:"LHRA"},
+  {lon:-87.5249,lat:17.2032,coral:16.63,algae:18.37,fish_comm:584,fish_herb:1267,name:"LHRA"},
+  {lon:-87.54223,lat:17.20323,coral:18.73,algae:16.85,fish_comm:1054,fish_herb:2688,name:"R15 DFR"},
+  {lon:-87.5281,lat:17.2034,coral:14.97,algae:17.30,fish_comm:383,fish_herb:1354,name:"LHRA"},
+  {lon:-87.52811,lat:17.20341,coral:15.02,algae:17.01,fish_comm:384,fish_herb:1356,name:"R17 SFR"},
+  {lon:-87.5307,lat:17.2066,coral:16.41,algae:18.26,fish_comm:814,fish_herb:1623,name:"LHRA"},
+  {lon:-87.5638,lat:17.2237,coral:15.95,algae:17.36,fish_comm:799,fish_herb:2206,name:"LHRA"},
+  {lon:-87.6046,lat:17.2243,coral:16.61,algae:18.99,fish_comm:149,fish_herb:801,name:"LHRA"},
+  {lon:-87.60154,lat:17.22598,coral:13.65,algae:19.59,fish_comm:138,fish_herb:940,name:"R13 SFR"},
+  {lon:-87.6015,lat:17.226,coral:13.79,algae:19.61,fish_comm:135,fish_herb:917,name:"LHRA"},
+  {lon:-88.05223,lat:17.24508,coral:17.22,algae:11.18,fish_comm:423,fish_herb:1983,name:"Rendezvous Caye Patch"},
+  {lon:-88.0522,lat:17.2451,coral:17.26,algae:11.50,fish_comm:422,fish_herb:1970,name:"Rendezvous"},
+  {lon:-87.83336,lat:17.24799,coral:16.26,algae:19.10,fish_comm:395,fish_herb:1048,name:"1206-DFR"},
+  {lon:-87.8334,lat:17.248,coral:16.42,algae:18.60,fish_comm:393,fish_herb:1043,name:"1206DFR"},
+  {lon:-87.83705,lat:17.2486,coral:16.92,algae:15.56,fish_comm:300,fish_herb:1294,name:"1206-SFR"},
+  {lon:-87.8337,lat:17.2486,coral:16.09,algae:18.41,fish_comm:404,fish_herb:1027,name:"1206SFR"},
+  {lon:-87.83865,lat:17.24913,coral:15.64,algae:16.38,fish_comm:340,fish_herb:1238,name:"1206-BR"},
+  {lon:-87.8386,lat:17.25097,coral:15.54,algae:16.96,fish_comm:275,fish_herb:1220,name:"Bully Bay"},
+  {lon:-87.95623,lat:17.25613,coral:16.43,algae:12.60,fish_comm:391,fish_herb:1660,name:"1062-BR"},
+  {lon:-87.572,lat:17.2574,coral:16.60,algae:17.80,fish_comm:410,fish_herb:1314,name:"LHRA"},
+  {lon:-87.57198,lat:17.25742,coral:16.70,algae:17.74,fish_comm:425,fish_herb:1315,name:"R11 SFR"},
+  {lon:-87.9593,lat:17.2587,coral:14.10,algae:14.73,fish_comm:329,fish_herb:1392,name:"1062-SFR"},
+  {lon:-87.95925,lat:17.25871,coral:13.83,algae:14.50,fish_comm:338,fish_herb:1409,name:"1062-SFR"},
+  {lon:-87.5558,lat:17.2591,coral:16.18,algae:16.77,fish_comm:441,fish_herb:1593,name:"West Halfmoon Caye"},
+  {lon:-87.96102,lat:17.2603,coral:17.49,algae:14.10,fish_comm:483,fish_herb:1326,name:"1062-DFR"},
+  {lon:-87.961,lat:17.2603,coral:16.93,algae:13.67,fish_comm:474,fish_herb:1340,name:"1062DFR"},
+  {lon:-88.0538,lat:17.3072,coral:17.01,algae:12.78,fish_comm:706,fish_herb:2393,name:"Coral Lane"},
+  {lon:-87.584,lat:17.3097,coral:16.91,algae:16.18,fish_comm:779,fish_herb:1779,name:"Lighthouse"},
+  {lon:-87.58365,lat:17.3097,coral:16.07,algae:16.88,fish_comm:693,fish_herb:2092,name:"R10 DFR"},
+  {lon:-87.5836,lat:17.3097,coral:16.16,algae:16.10,fish_comm:677,fish_herb:2117,name:"LHRA"},
+  {lon:-87.5345,lat:17.3147,coral:13.34,algae:17.22,fish_comm:489,fish_herb:1762,name:"LHRA"},
+  {lon:-87.53019,lat:17.31648,coral:14.95,algae:17.54,fish_comm:584,fish_herb:1954,name:"R9 BR"},
+  {lon:-87.5302,lat:17.3165,coral:14.71,algae:17.06,fish_comm:568,fish_herb:1955,name:"LHRA"},
+  {lon:-88.0425,lat:17.31848,coral:16.67,algae:11.21,fish_comm:538,fish_herb:2249,name:"Paranga Grounding Site"},
+  {lon:-88.0425,lat:17.3185,coral:17.16,algae:11.47,fish_comm:551,fish_herb:2395,name:"Paranga Grounding"},
+  {lon:-87.78709,lat:17.33406,coral:14.84,algae:17.34,fish_comm:286,fish_herb:1472,name:"SP-DFR"},
+  {lon:-87.7871,lat:17.3341,coral:14.95,algae:17.43,fish_comm:297,fish_herb:1508,name:"Soldier Point"},
+  {lon:-87.7877,lat:17.3344,coral:15.81,algae:17.17,fish_comm:431,fish_herb:1395,name:"SP_SFR"},
+  {lon:-87.482,lat:17.3513,coral:16.34,algae:18.68,fish_comm:721,fish_herb:1614,name:"Lighthouse"},
+  {lon:-88.0385,lat:17.3521,coral:17.05,algae:12.69,fish_comm:395,fish_herb:1663,name:"Goff's Caye"},
+  {lon:-88.1501,lat:17.3524,coral:16.07,algae:14.35,fish_comm:556,fish_herb:1979,name:"Robinson area flats"},
+  {lon:-88.1709,lat:17.3568,coral:15.96,algae:14.81,fish_comm:478,fish_herb:1646,name:"Robinson Point Caye"},
+  {lon:-87.93974,lat:17.38347,coral:14.28,algae:15.63,fish_comm:513,fish_herb:1626,name:"WP4-DFR"},
+  {lon:-87.9397,lat:17.3835,coral:14.46,algae:15.54,fish_comm:511,fish_herb:1651,name:"West Point 4"},
+  {lon:-87.93821,lat:17.38359,coral:16.88,algae:14.04,fish_comm:326,fish_herb:1338,name:"WP4-SFR"},
+  {lon:-87.9382,lat:17.3836,coral:16.94,algae:13.85,fish_comm:318,fish_herb:1320,name:"West Point 4"},
+  {lon:-87.5184,lat:17.3837,coral:14.09,algae:23.19,fish_comm:220,fish_herb:762,name:"LHRA"},
+  {lon:-88.04222,lat:17.385,coral:18.13,algae:11.57,fish_comm:461,fish_herb:2084,name:"East of Water Caye"},
+  {lon:-87.93578,lat:17.38659,coral:16.23,algae:14.07,fish_comm:242,fish_herb:1214,name:"WP4-BR"},
+  {lon:-87.9358,lat:17.3866,coral:16.22,algae:14.11,fish_comm:241,fish_herb:1231,name:"West Point 4"},
+  {lon:-88.0456,lat:17.38828,coral:15.85,algae:13.41,fish_comm:652,fish_herb:1902,name:"East of Water Caye"},
+  {lon:-88.0456,lat:17.3883,coral:16.26,algae:13.46,fish_comm:651,fish_herb:1854,name:"Spanish Bay"},
+  {lon:-87.46236,lat:17.39226,coral:16.41,algae:17.06,fish_comm:405,fish_herb:1095,name:"R6 DFR"},
+  {lon:-87.4624,lat:17.3923,coral:16.75,algae:17.03,fish_comm:411,fish_herb:1116,name:"LHRA"},
+  {lon:-87.4635,lat:17.3936,coral:15.88,algae:15.00,fish_comm:247,fish_herb:1171,name:"LHRA"},
+  {lon:-87.46348,lat:17.39364,coral:15.86,algae:15.20,fish_comm:255,fish_herb:1120,name:"R7 SFR"},
+  {lon:-87.46557,lat:17.3956,coral:17.25,algae:14.89,fish_comm:289,fish_herb:1316,name:"Transfer Wrecksite"},
+  {lon:-87.8094,lat:17.41428,coral:16.01,algae:14.47,fish_comm:694,fish_herb:2473,name:"East of Turneffe Flats"},
+  {lon:-87.45177,lat:17.4303,coral:20.13,algae:14.91,fish_comm:391,fish_herb:1816,name:"Sandbore SPAG site"},
+  {lon:-87.534,lat:17.43809,coral:16.51,algae:16.07,fish_comm:188,fish_herb:1121,name:"WQ4"},
+  {lon:-87.534,lat:17.4381,coral:16.17,algae:16.47,fish_comm:190,fish_herb:1099,name:"LHRA"},
+  {lon:-87.5293,lat:17.4432,coral:16.34,algae:16.66,fish_comm:317,fish_herb:1483,name:"LHRA"},
+  {lon:-87.5283,lat:17.4459,coral:15.52,algae:19.67,fish_comm:533,fish_herb:1298,name:"LHRA"},
+  {lon:-87.52826,lat:17.44595,coral:16.13,algae:19.84,fish_comm:542,fish_herb:1287,name:"R4 DFR"},
+  {lon:-88.0584,lat:17.4481,coral:16.52,algae:14.93,fish_comm:398,fish_herb:1333,name:"Way Point 3"},
+  {lon:-88.0324,lat:17.4496,coral:25.68,algae:18.75,fish_comm:679,fish_herb:2967,name:"Gallows Flat"},
+  {lon:-87.49525,lat:17.46172,coral:16.95,algae:17.05,fish_comm:423,fish_herb:1669,name:"West of Sandbore Caye"},
+  {lon:-87.4986,lat:17.4618,coral:15.08,algae:17.80,fish_comm:518,fish_herb:1922,name:"LHRA"},
+  {lon:-87.48732,lat:17.47189,coral:15.33,algae:18.75,fish_comm:221,fish_herb:1118,name:"R2 SFR"},
+  {lon:-87.4873,lat:17.4719,coral:15.57,algae:19.42,fish_comm:215,fish_herb:1135,name:"LHRA"},
+  {lon:-87.4864,lat:17.4735,coral:12.88,algae:21.57,fish_comm:367,fish_herb:1503,name:"LHRA"},
+  {lon:-88.04193,lat:17.4882,coral:15.73,algae:14.14,fish_comm:557,fish_herb:1895,name:"North Gallows"},
+  {lon:-87.7492,lat:17.51,coral:16.81,algae:16.60,fish_comm:805,fish_herb:1836,name:"Cockroach Zone"},
+  {lon:-87.74921,lat:17.51001,coral:16.65,algae:16.23,fish_comm:833,fish_herb:1851,name:"CZ2-DFR"},
+  {lon:-87.7499,lat:17.5101,coral:16.53,algae:15.92,fish_comm:610,fish_herb:2211,name:"CZ2_SFR"},
+  {lon:-87.8228,lat:17.5465,coral:15.16,algae:13.38,fish_comm:357,fish_herb:1769,name:"West Point 5"},
+  {lon:-87.82282,lat:17.54654,coral:15.41,algae:13.70,fish_comm:363,fish_herb:1801,name:"WP5-DFR"},
+  {lon:-87.8219,lat:17.5467,coral:17.41,algae:13.20,fish_comm:376,fish_herb:1579,name:"West Point 5"},
+  {lon:-87.82186,lat:17.54674,coral:17.42,algae:13.36,fish_comm:353,fish_herb:1587,name:"WP5-SFR"},
+  {lon:-87.82041,lat:17.54707,coral:17.21,algae:13.39,fish_comm:322,fish_herb:1400,name:"WP5-BR"},
+  {lon:-87.821,lat:17.54819,coral:17.20,algae:13.73,fish_comm:583,fish_herb:1794,name:"West of Jack Barrow Camp"},
+  {lon:-87.7489,lat:17.56664,coral:16.68,algae:13.88,fish_comm:1132,fish_herb:3111,name:"Southwest of Maugre Caye"},
+  {lon:-87.7884,lat:17.6205,coral:16.23,algae:16.45,fish_comm:692,fish_herb:2157,name:"Mauger Point"},
+  {lon:-87.78842,lat:17.62051,coral:16.37,algae:16.30,fish_comm:669,fish_herb:2104,name:"MP-SFR"},
+  {lon:-87.7889,lat:17.6211,coral:16.16,algae:15.96,fish_comm:648,fish_herb:2067,name:"Mauger Point"},
+  {lon:-87.78891,lat:17.62112,coral:16.48,algae:15.91,fish_comm:662,fish_herb:2048,name:"MP-DFR"},
+  {lon:-88.0161,lat:17.6876,coral:16.76,algae:14.01,fish_comm:566,fish_herb:1850,name:"BZ1229"},
+  {lon:-88.01608,lat:17.68764,coral:16.88,algae:13.98,fish_comm:570,fish_herb:1919,name:"Caye Chapel"},
+  {lon:-88.0109,lat:17.7256,coral:16.01,algae:15.64,fish_comm:809,fish_herb:2179,name:"Caye Caulker Southern Channel"},
+  {lon:-87.9914,lat:17.7704,coral:16.71,algae:20.63,fish_comm:956,fish_herb:2257,name:"Mackerel Hole"},
+  {lon:-87.99141,lat:17.77042,coral:16.41,algae:20.51,fish_comm:923,fish_herb:2196,name:"Mackerel Hole"},
+  {lon:-87.9954,lat:17.7996,coral:15.83,algae:17.48,fish_comm:548,fish_herb:1535,name:"N of Caye Caulker MR"},
+  {lon:-87.99541,lat:17.79961,coral:15.91,algae:17.34,fish_comm:541,fish_herb:1528,name:"N of Caye Caulker MR"},
+  {lon:-87.9869,lat:17.8193,coral:15.46,algae:20.06,fish_comm:584,fish_herb:1448,name:"Coral Gardens"},
+  {lon:-87.98686,lat:17.81931,coral:15.68,algae:19.20,fish_comm:569,fish_herb:1423,name:"Coral Gardens"},
+  {lon:-87.9794,lat:17.8426,coral:16.48,algae:20.34,fish_comm:611,fish_herb:1774,name:"BZHCCD02"},
+  {lon:-87.97327,lat:17.85897,coral:17.75,algae:22.21,fish_comm:450,fish_herb:1385,name:"Hol Chan"},
+  {lon:-87.9722,lat:17.8684,coral:15.55,algae:20.92,fish_comm:711,fish_herb:1507,name:"BZHCCD01"},
+  {lon:-87.9695,lat:17.8817,coral:13.40,algae:21.50,fish_comm:515,fish_herb:1385,name:"N of Hol Chan MR"},
+  {lon:-87.96947,lat:17.8817,coral:13.67,algae:21.20,fish_comm:505,fish_herb:1371,name:"N of Hol Chan MR"},
+  {lon:-87.93876,lat:17.93406,coral:14.85,algae:20.91,fish_comm:543,fish_herb:1428,name:"Tres Cocos"},
+  {lon:-87.9388,lat:17.9341,coral:14.77,algae:21.21,fish_comm:554,fish_herb:1404,name:"Tres Cocos"},
+  {lon:-87.90297,lat:17.99067,coral:15.93,algae:22.68,fish_comm:174,fish_herb:767,name:"Mexico Rocks"},
+  {lon:-87.903,lat:17.9907,coral:16.54,algae:22.31,fish_comm:188,fish_herb:812,name:"Mexico Rocks"},
+  {lon:-87.86372,lat:18.08799,coral:16.16,algae:20.24,fish_comm:620,fish_herb:1860,name:"Basil Jones"},
+  {lon:-87.8637,lat:18.088,coral:16.10,algae:20.27,fish_comm:627,fish_herb:1888,name:"Basil Jones"},
+  {lon:-87.84692,lat:18.1125,coral:15.97,algae:19.19,fish_comm:427,fish_herb:1475,name:"Basil Jones"},
+  {lon:-87.834,lat:18.16878,coral:16.22,algae:20.00,fish_comm:766,fish_herb:1668,name:"Barracuda Patch"},
+  {lon:-87.828,lat:18.17546,coral:17.25,algae:19.89,fish_comm:588,fish_herb:1475,name:"North of Alleys"},
+  {lon:-87.828,lat:18.1755,coral:17.35,algae:20.31,fish_comm:599,fish_herb:1393,name:"BZ1081"},
+  {lon:-87.8284,lat:18.1807,coral:20.07,algae:22.46,fish_comm:647,fish_herb:1864,name:"BZ1234"},
+  {lon:-87.83305,lat:18.186,coral:17.35,algae:18.80,fish_comm:514,fish_herb:1600,name:"North of Mexico Rocks"}
+];
+
+const betaSpecies = [
+  {species:"Coral cover",predictor:"Intercept",mean:15.85,q025:14.46,q975:17.14,sig:true},
+  {species:"Coral cover",predictor:"Depth",mean:16.43,q025:14.39,q975:18.41,sig:true},
+  {species:"Coral cover",predictor:"Depth²",mean:6.19,q025:5.96,q975:6.43,sig:true},
+  {species:"Coral cover",predictor:"Slope",mean:7.42,q025:7.24,q975:7.60,sig:true},
+  {species:"Coral cover",predictor:"Aspect (N-S)",mean:0.057,q025:-1.01,q975:1.25,sig:false},
+  {species:"Coral cover",predictor:"Aspect (E-W)",mean:-0.35,q025:-1.86,q975:0.76,sig:false},
+  {species:"Coral cover",predictor:"Terrain roughness",mean:0.003,q025:-0.26,q975:0.27,sig:false},
+  {species:"Macroalgae cover",predictor:"Intercept",mean:-0.09,q025:-0.29,q975:0.11,sig:false},
+  {species:"Macroalgae cover",predictor:"Depth",mean:0.85,q025:0.25,q975:1.50,sig:true},
+  {species:"Macroalgae cover",predictor:"Depth²",mean:0.45,q025:-0.25,q975:1.19,sig:false},
+  {species:"Macroalgae cover",predictor:"Slope",mean:-0.01,q025:-0.13,q975:0.10,sig:false},
+  {species:"Macroalgae cover",predictor:"Aspect (N-S)",mean:-0.03,q025:-0.11,q975:0.06,sig:false},
+  {species:"Macroalgae cover",predictor:"Aspect (E-W)",mean:0.007,q025:-0.83,q975:0.92,sig:false},
+  {species:"Macroalgae cover",predictor:"Terrain roughness",mean:-0.48,q025:-1.82,q975:0.45,sig:false},
+  {species:"Commercial fish (log)",predictor:"Intercept",mean:-0.03,q025:-0.21,q975:0.15,sig:false},
+  {species:"Commercial fish (log)",predictor:"Depth",mean:-0.01,q025:-0.16,q975:0.13,sig:false},
+  {species:"Commercial fish (log)",predictor:"Depth²",mean:1.03,q025:-0.12,q975:2.42,sig:false},
+  {species:"Commercial fish (log)",predictor:"Slope",mean:-0.66,q025:-2.26,q975:0.54,sig:false},
+  {species:"Commercial fish (log)",predictor:"Aspect (N-S)",mean:-0.04,q025:-0.20,q975:0.12,sig:false},
+  {species:"Commercial fish (log)",predictor:"Aspect (E-W)",mean:-0.01,q025:-0.14,q975:0.11,sig:false},
+  {species:"Commercial fish (log)",predictor:"Terrain roughness",mean:0.05,q025:-0.73,q975:0.95,sig:false},
+  {species:"Herbivorous fish (log)",predictor:"Intercept",mean:-0.20,q025:-1.22,q975:0.67,sig:false},
+  {species:"Herbivorous fish (log)",predictor:"Depth",mean:-0.09,q025:-0.26,q975:0.07,sig:false},
+  {species:"Herbivorous fish (log)",predictor:"Depth²",mean:-0.02,q025:-0.15,q975:0.10,sig:false},
+  {species:"Herbivorous fish (log)",predictor:"Slope",mean:-0.08,q025:-0.91,q975:0.83,sig:false},
+  {species:"Herbivorous fish (log)",predictor:"Aspect (N-S)",mean:-0.55,q025:-1.87,q975:0.37,sig:false},
+  {species:"Herbivorous fish (log)",predictor:"Aspect (E-W)",mean:-0.23,q025:-0.39,q975:-0.06,sig:true},
+  {species:"Herbivorous fish (log)",predictor:"Terrain roughness",mean:0.003,q025:-0.12,q975:0.13,sig:false}
+];
+
+const betaCommunity = [
+  {predictor:"Intercept",mean:10.22,q025:1.56,q975:16.50,sig:true},
+  {predictor:"Depth",mean:-0.08,q025:-1.01,q975:0.83,sig:false},
+  {predictor:"Depth²",mean:0.32,q025:-0.47,q975:1.21,sig:false},
+  {predictor:"Slope",mean:-0.14,q025:-1.00,q975:0.52,sig:false},
+  {predictor:"Aspect (N-S)",mean:0.07,q025:-1.38,q975:1.43,sig:false},
+  {predictor:"Aspect (E-W)",mean:-0.06,q025:-0.73,q975:0.66,sig:false},
+  {predictor:"Terrain roughness",mean:-0.22,q025:-1.10,q975:0.57,sig:false}
+];
+
+const residuals = [
+  {species:"Coral cover",m1:9.016,m2:8.88},
+  {species:"Macroalgae cover",m1:12.249,m2:10.488},
+  {species:"Commercial fish (log)",m1:1.132,m2:0.853},
+  {species:"Herbivorous fish (log)",m1:0.876,m2:0.686}
+];
+
+// ===== TABS =====
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById(t.dataset.tab).classList.add('active');
+    if (t.dataset.tab === 'map-panel') map.invalidateSize();
+  });
+});
+
+// ===== MAP =====
+const map = L.map('map').setView([17.2, -87.95], 8);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO', maxZoom: 18
+}).addTo(map);
+
+let markers = [];
+let activeVar = 'coral';
+const varLabels = {
+  coral: 'Coral Cover (%)', algae: 'Macroalgae Cover (%)',
+  fish_comm: 'Commercial Fish (g/100m²)', fish_herb: 'Herbivorous Fish (g/100m²)'
+};
+
+function getColor(val, min, max) {
+  const t = Math.max(0, Math.min(1, (val - min) / (max - min || 1)));
+  // blue → cyan → green → yellow → red
+  const stops = [
+    [37, 99, 235], [34, 211, 238], [34, 197, 94], [234, 179, 8], [239, 68, 68]
+  ];
+  const idx = t * (stops.length - 1);
+  const lo = Math.floor(idx), hi = Math.min(lo + 1, stops.length - 1);
+  const f = idx - lo;
+  const r = Math.round(stops[lo][0] + f * (stops[hi][0] - stops[lo][0]));
+  const g = Math.round(stops[lo][1] + f * (stops[hi][1] - stops[lo][1]));
+  const b = Math.round(stops[lo][2] + f * (stops[hi][2] - stops[lo][2]));
+  return `rgb(${r},${g},${b})`;
+}
+
+function updateMap() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+  const vals = predictions.map(p => p[activeVar]);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  document.getElementById('leg-min').textContent = min.toFixed(0);
+  document.getElementById('leg-max').textContent = max.toFixed(0);
+
+  predictions.forEach(p => {
+    const color = getColor(p[activeVar], min, max);
+    const m = L.circleMarker([p.lat, p.lon], {
+      radius: 7, fillColor: color, color: '#fff', weight: 1, fillOpacity: 0.85
+    }).addTo(map);
+    m.on('click', () => showSiteInfo(p));
+    markers.push(m);
+  });
+}
+
+function showSiteInfo(p) {
+  document.getElementById('site-info').innerHTML = `
+    <h4>${p.name}</h4>
+    <div class="row"><span class="label">Latitude</span><span>${p.lat.toFixed(4)}</span></div>
+    <div class="row"><span class="label">Longitude</span><span>${p.lon.toFixed(4)}</span></div>
+    <hr style="border-color:var(--border);margin:0.4rem 0">
+    <div class="row"><span class="label">Coral Cover</span><span style="color:var(--coral)">${p.coral.toFixed(1)}%</span></div>
+    <div class="row"><span class="label">Macroalgae</span><span style="color:var(--algae)">${p.algae.toFixed(1)}%</span></div>
+    <div class="row"><span class="label">Commercial Fish</span><span style="color:var(--comm)">${p.fish_comm.toFixed(0)} g/100m²</span></div>
+    <div class="row"><span class="label">Herbivorous Fish</span><span style="color:var(--herb)">${p.fish_herb.toFixed(0)} g/100m²</span></div>
+  `;
+}
+
+document.querySelectorAll('.var-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.var-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeVar = btn.dataset.var;
+    updateMap();
+  });
+});
+updateMap();
+
+// ===== SUMMARY =====
+function stats(arr) {
+  const s = arr.slice().sort((a,b) => a - b);
+  const mean = s.reduce((a,b) => a + b, 0) / s.length;
+  const med = s.length % 2 ? s[Math.floor(s.length/2)] : (s[s.length/2-1] + s[s.length/2]) / 2;
+  return { mean, med, min: s[0], max: s[s.length-1], n: s.length };
+}
+
+const vars = [
+  { key: 'coral', label: 'Coral Cover (%)', cls: 'coral' },
+  { key: 'algae', label: 'Macroalgae Cover (%)', cls: 'algae' },
+  { key: 'fish_comm', label: 'Commercial Fish (g/100m²)', cls: 'comm' },
+  { key: 'fish_herb', label: 'Herbivorous Fish (g/100m²)', cls: 'herb' }
+];
+
+const cardsEl = document.getElementById('stat-cards');
+vars.forEach(v => {
+  const s = stats(predictions.map(p => p[v.key]));
+  cardsEl.innerHTML += `
+    <div class="card ${v.cls}">
+      <div class="value">${s.mean.toFixed(1)}</div>
+      <div class="label">${v.label} (mean)<br>Range: ${s.min.toFixed(1)} – ${s.max.toFixed(1)}</div>
+    </div>`;
+});
+
+// Histogram
+const histCtx = document.getElementById('histChart').getContext('2d');
+function makeBins(data, nBins = 20) {
+  const min = Math.min(...data), max = Math.max(...data);
+  const w = (max - min) / nBins;
+  const bins = Array(nBins).fill(0);
+  const labels = [];
+  data.forEach(v => { const i = Math.min(Math.floor((v - min) / w), nBins - 1); bins[i]++; });
+  for (let i = 0; i < nBins; i++) labels.push((min + i * w + w/2).toFixed(1));
+  return { bins, labels };
+}
+const coralBins = makeBins(predictions.map(p => p.coral), 15);
+const algaeBins = makeBins(predictions.map(p => p.algae), 15);
+new Chart(histCtx, {
+  type: 'bar',
+  data: {
+    labels: coralBins.labels,
+    datasets: [
+      { label: 'Coral Cover', data: coralBins.bins, backgroundColor: 'rgba(249,115,22,0.6)', borderColor: '#f97316', borderWidth: 1 },
+      { label: 'Macroalgae Cover', data: algaeBins.bins, backgroundColor: 'rgba(34,197,94,0.6)', borderColor: '#22c55e', borderWidth: 1 }
+    ]
+  },
+  options: {
+    responsive: true, plugins: { legend: { labels: { color: '#94a3b8' } } },
+    scales: {
+      x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: '% Cover', color: '#94a3b8' } },
+      y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'Count', color: '#94a3b8' } }
+    }
+  }
+});
+
+// Scatter: coral vs algae
+new Chart(document.getElementById('scatterChart'), {
+  type: 'scatter',
+  data: {
+    datasets: [{
+      label: 'Sites', data: predictions.map(p => ({ x: p.coral, y: p.algae })),
+      backgroundColor: 'rgba(56,189,248,0.5)', borderColor: '#38bdf8', pointRadius: 4
+    }]
+  },
+  options: {
+    responsive: true, plugins: { legend: { display: false } },
+    scales: {
+      x: { title: { display: true, text: 'Coral Cover (%)', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+      y: { title: { display: true, text: 'Macroalgae Cover (%)', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+    }
+  }
+});
+
+// Scatter: commercial vs herbivorous
+new Chart(document.getElementById('fishScatter'), {
+  type: 'scatter',
+  data: {
+    datasets: [{
+      label: 'Sites', data: predictions.map(p => ({ x: p.fish_comm, y: p.fish_herb })),
+      backgroundColor: 'rgba(167,139,250,0.5)', borderColor: '#a78bfa', pointRadius: 4
+    }]
+  },
+  options: {
+    responsive: true, plugins: { legend: { display: false } },
+    scales: {
+      x: { title: { display: true, text: 'Commercial Fish (g/100m²)', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+      y: { title: { display: true, text: 'Herbivorous Fish (g/100m²)', color: '#94a3b8' }, ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+    }
+  }
+});
+
+// Latitude band chart
+const latBands = [];
+for (let lat = 15.9; lat < 18.3; lat += 0.3) {
+  const band = predictions.filter(p => p.lat >= lat && p.lat < lat + 0.3);
+  if (band.length) {
+    latBands.push({
+      label: `${lat.toFixed(1)}°`,
+      coral: band.reduce((s,p) => s + p.coral, 0) / band.length,
+      algae: band.reduce((s,p) => s + p.algae, 0) / band.length,
+      fish_comm: band.reduce((s,p) => s + p.fish_comm, 0) / band.length,
+      fish_herb: band.reduce((s,p) => s + p.fish_herb, 0) / band.length
+    });
+  }
+}
+new Chart(document.getElementById('latChart'), {
+  type: 'bar',
+  data: {
+    labels: latBands.map(b => b.label),
+    datasets: [
+      { label: 'Coral (%)', data: latBands.map(b => b.coral), backgroundColor: 'rgba(249,115,22,0.7)', yAxisID: 'y' },
+      { label: 'Macroalgae (%)', data: latBands.map(b => b.algae), backgroundColor: 'rgba(34,197,94,0.7)', yAxisID: 'y' },
+      { label: 'Comm. Fish (g/100m²)', data: latBands.map(b => b.fish_comm), backgroundColor: 'rgba(167,139,250,0.5)', yAxisID: 'y1', type: 'line', borderColor: '#a78bfa', tension: 0.3 },
+      { label: 'Herb. Fish (g/100m²)', data: latBands.map(b => b.fish_herb), backgroundColor: 'rgba(250,204,21,0.5)', yAxisID: 'y1', type: 'line', borderColor: '#facc15', tension: 0.3 }
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+    scales: {
+      x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'Latitude band (°N)', color: '#94a3b8' } },
+      y: { position: 'left', ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'Cover (%)', color: '#94a3b8' } },
+      y1: { position: 'right', ticks: { color: '#94a3b8' }, grid: { display: false }, title: { display: true, text: 'Biomass (g/100m²)', color: '#94a3b8' } }
+    }
+  }
+});
+
+// ===== MODEL RESULTS =====
+// Species coefficients (exclude intercept)
+const speciesColors = {
+  'Coral cover': '#f97316', 'Macroalgae cover': '#22c55e',
+  'Commercial fish (log)': '#a78bfa', 'Herbivorous fish (log)': '#facc15'
+};
+const preds = ['Depth','Depth²','Slope','Aspect (N-S)','Aspect (E-W)','Terrain roughness'];
+const speciesList = Object.keys(speciesColors);
+
+const coefDatasets = speciesList.map((sp, si) => {
+  const coeffs = betaSpecies.filter(b => b.species === sp && preds.includes(b.predictor));
+  return {
+    label: sp,
+    data: coeffs.map(c => c.mean),
+    backgroundColor: speciesColors[sp],
+    borderColor: speciesColors[sp],
+    borderWidth: 1
+  };
+});
+
+new Chart(document.getElementById('coefChart'), {
+  type: 'bar',
+  data: { labels: preds, datasets: coefDatasets },
+  options: {
+    responsive: true, indexAxis: 'y',
+    plugins: { legend: { labels: { color: '#94a3b8' } },
+      tooltip: {
+        callbacks: {
+          afterLabel: function(ctx) {
+            const sp = speciesList[ctx.datasetIndex];
+            const pr = preds[ctx.dataIndex];
+            const b = betaSpecies.find(x => x.species === sp && x.predictor === pr);
+            return b ? `95% CI: [${b.q025.toFixed(2)}, ${b.q975.toFixed(2)}]${b.sig ? ' *' : ''}` : '';
+          }
+        }
+      }
+    },
+    scales: {
+      x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'Coefficient estimate', color: '#94a3b8' } },
+      y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+    }
+  }
+});
+
+// Community effects with error bars
+const commPreds = betaCommunity.filter(b => b.predictor !== 'Intercept');
+new Chart(document.getElementById('commCoefChart'), {
+  type: 'bar',
+  data: {
+    labels: commPreds.map(c => c.predictor),
+    datasets: [{
+      label: 'Community mean',
+      data: commPreds.map(c => c.mean),
+      backgroundColor: commPreds.map(c => c.sig ? 'rgba(56,189,248,0.7)' : 'rgba(148,163,184,0.4)'),
+      borderColor: commPreds.map(c => c.sig ? '#38bdf8' : '#64748b'),
+      borderWidth: 1
+    }]
+  },
+  options: {
+    responsive: true, indexAxis: 'y',
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          afterLabel: (ctx) => {
+            const c = commPreds[ctx.dataIndex];
+            return `95% CI: [${c.q025.toFixed(2)}, ${c.q975.toFixed(2)}]${c.sig ? ' (significant)' : ''}`;
+          }
+        }
+      }
+    },
+    scales: {
+      x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'Coefficient', color: '#94a3b8' } },
+      y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+    }
+  }
+});
+
+// Residual comparison
+new Chart(document.getElementById('residChart'), {
+  type: 'bar',
+  data: {
+    labels: residuals.map(r => r.species),
+    datasets: [
+      { label: 'Non-spatial (M1)', data: residuals.map(r => r.m1), backgroundColor: 'rgba(148,163,184,0.6)', borderColor: '#94a3b8', borderWidth: 1 },
+      { label: 'Spatial (M2)', data: residuals.map(r => r.m2), backgroundColor: 'rgba(56,189,248,0.6)', borderColor: '#38bdf8', borderWidth: 1 }
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { labels: { color: '#94a3b8' } } },
+    scales: {
+      x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: '#334155' } },
+      y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: 'Residual SD', color: '#94a3b8' } }
+    }
+  }
+});
+
+// Improvement
+const improv = residuals.map(r => ({ species: r.species, pct: ((r.m1 - r.m2) / r.m1 * 100) }));
+new Chart(document.getElementById('improvChart'), {
+  type: 'bar',
+  data: {
+    labels: improv.map(i => i.species),
+    datasets: [{
+      label: '% Reduction in Residual SD',
+      data: improv.map(i => i.pct),
+      backgroundColor: improv.map((_, i) => [
+        'rgba(249,115,22,0.7)', 'rgba(34,197,94,0.7)', 'rgba(167,139,250,0.7)', 'rgba(250,204,21,0.7)'
+      ][i]),
+      borderWidth: 0
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: '#334155' } },
+      y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, title: { display: true, text: '% Improvement', color: '#94a3b8' } }
+    }
+  }
+});
+
+// ===== DATA TABLE =====
+const tableCols = ['Name', 'Lat', 'Lon', 'Coral (%)', 'Macroalgae (%)', 'Comm. Fish', 'Herb. Fish'];
+const thead = document.querySelector('#data-table thead tr');
+let sortCol = 0, sortAsc = true;
+tableCols.forEach((c, i) => {
+  const th = document.createElement('th');
+  th.textContent = c;
+  th.addEventListener('click', () => {
+    sortCol = i; sortAsc = (sortCol === i) ? !sortAsc : true;
+    renderTable(document.getElementById('table-search').value);
+  });
+  thead.appendChild(th);
+});
+
+function renderTable(filter = '') {
+  const tbody = document.querySelector('#data-table tbody');
+  const f = filter.toLowerCase();
+  let rows = predictions
+    .map(p => [p.name, p.lat.toFixed(4), p.lon.toFixed(4), p.coral.toFixed(1), p.algae.toFixed(1), p.fish_comm.toFixed(0), p.fish_herb.toFixed(0)])
+    .filter(r => !f || r.some(c => c.toLowerCase().includes(f)));
+
+  rows.sort((a, b) => {
+    const va = isNaN(+a[sortCol]) ? a[sortCol] : +a[sortCol];
+    const vb = isNaN(+b[sortCol]) ? b[sortCol] : +b[sortCol];
+    return sortAsc ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
+  });
+
+  tbody.innerHTML = rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('');
+}
+document.getElementById('table-search').addEventListener('input', e => renderTable(e.target.value));
+renderTable();
+</script>
+</body>
+</html>
